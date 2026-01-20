@@ -260,6 +260,12 @@ std::shared_ptr<Connection> ConnectionManager::connect_to(const std::string& add
     ev.data.fd = sock;
     epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, sock, &ev);
     
+    // Add to unregistered so it gets polled for incoming data
+    {
+        std::lock_guard<std::mutex> lock(connections_mutex_);
+        unregistered_connections_.push_back(conn);
+    }
+    
     return conn;
 }
 
