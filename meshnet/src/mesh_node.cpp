@@ -59,13 +59,13 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
         // Send our ANNOUNCE to the new connection
         Packet announce(PacketType::ANNOUNCE, node_id_);
         std::vector<uint8_t> payload;
-        uint16_t net_port = htons(listen_port_);
-        payload.push_back(static_cast<uint8_t>(net_port >> 8));
-        payload.push_back(static_cast<uint8_t>(net_port & 0xFF));
+        // Manual Big Endian serialization
+        payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
+        payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
         announce.set_payload(payload);
         conn->send(announce);
     });
-    
+
     if (!conn_manager_->start()) {
         std::cerr << "[ERROR] ConnectionManager failed to start" << std::endl;
         return false;
@@ -198,9 +198,8 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     // Send our ANNOUNCE
     Packet announce(PacketType::ANNOUNCE, node_id_);
     std::vector<uint8_t> payload;
-    uint16_t net_port = htons(listen_port_);
-    payload.push_back(static_cast<uint8_t>(net_port >> 8));
-    payload.push_back(static_cast<uint8_t>(net_port & 0xFF));
+    payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
+    payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
     announce.set_payload(payload);
     
     conn->send(announce);
@@ -215,9 +214,8 @@ void MeshNode::discover_peers() {
     Packet discover(PacketType::DISCOVER, node_id_);
     
     std::vector<uint8_t> payload;
-    uint16_t net_port = htons(listen_port_);
-    payload.push_back(static_cast<uint8_t>(net_port >> 8));
-    payload.push_back(static_cast<uint8_t>(net_port & 0xFF));
+    payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
+    payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
     discover.set_payload(payload);
     
     auto data = discover.serialize();
@@ -283,9 +281,9 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
         case PacketType::ANNOUNCE: {
             std::cout << "[DEBUG] Received ANNOUNCE from " << from_id << std::endl;
             if (packet.payload().size() >= 2) {
-                uint16_t peer_port = ntohs(
-                    *reinterpret_cast<const uint16_t*>(packet.payload().data())
-                );
+                // Manual Big Endian deserialization
+                const uint8_t* data = packet.payload().data();
+                uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
                 
                 // Register this connection with the node ID
                 conn_manager_->register_connection(from_id, conn);
@@ -401,17 +399,15 @@ void MeshNode::handle_discovery() {
             send_announce(addr_str, ntohs(sender_addr.sin_port));
             
             if (packet.payload().size() >= 2) {
-                uint16_t peer_port = ntohs(
-                    *reinterpret_cast<const uint16_t*>(packet.payload().data())
-                );
+                const uint8_t* data = packet.payload().data();
+                uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
                 connect_to_peer(addr_str, peer_port);
             }
         } else if (packet.type() == PacketType::ANNOUNCE) {
             std::cout << "[DEBUG] Got UDP ANNOUNCE from " << packet.source_id() << " at " << addr_str << std::endl;
             if (packet.payload().size() >= 2) {
-                uint16_t peer_port = ntohs(
-                    *reinterpret_cast<const uint16_t*>(packet.payload().data())
-                );
+                const uint8_t* data = packet.payload().data();
+                uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
                 
                 std::lock_guard<std::mutex> lock(peers_mutex_);
                 if (peers_.find(packet.source_id()) == peers_.end()) {
@@ -439,9 +435,8 @@ void MeshNode::send_announce(const std::string& to_addr, uint16_t to_port) {
     Packet announce(PacketType::ANNOUNCE, node_id_);
     
     std::vector<uint8_t> payload;
-    uint16_t net_port = htons(listen_port_);
-    payload.push_back(static_cast<uint8_t>(net_port >> 8));
-    payload.push_back(static_cast<uint8_t>(net_port & 0xFF));
+    payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
+    payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
     announce.set_payload(payload);
     
     auto data = announce.serialize();
