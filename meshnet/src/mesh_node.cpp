@@ -456,7 +456,7 @@ void MeshNode::forward_packet(const Packet& packet, uint16_t exclude_peer) {
     forward.set_payload(serialized);
     
     // Broadcast to all peers except the one we got it from
-    conn_manager_->broadcast(forward);
+    conn_manager_->broadcast(forward, exclude_peer);
 }
 
 void MeshNode::push_event(MeshEvent event) {

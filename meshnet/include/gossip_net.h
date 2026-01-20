@@ -17,14 +17,16 @@ extern "C" {
 #define GOSSIP_MAX_USERNAME_LEN  64
 #define GOSSIP_MAX_MESSAGE_LEN   16384
 
-typedef struct GossipEvent {
-    int event_type;
-    uint16_t peer_id;
+#pragma pack(push, 1)
+typedef struct {
+    int32_t event_type;
+    uint32_t peer_id;
+    uint32_t data_len;
+    int32_t error_code;
     char username[GOSSIP_MAX_USERNAME_LEN];
     uint8_t data[GOSSIP_MAX_MESSAGE_LEN];
-    size_t data_len;
-    int error_code;
 } GossipEvent;
+#pragma pack(pop)
 
 typedef struct GossipPeerInfo {
     uint16_t node_id;

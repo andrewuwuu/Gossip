@@ -323,15 +323,25 @@ void ConnectionManager::disconnect(uint16_t node_id) {
     }
 }
 
-void ConnectionManager::broadcast(const Packet& packet) {
+void ConnectionManager::broadcast(const Packet& packet, uint16_t exclude_node_id) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     for (auto& [id, conn] : connections_) {
-        conn->send(packet);
+        if (id != exclude_node_id) {
+            conn->send(packet);
+        }
     }
 }
 
 void ConnectionManager::register_connection(uint16_t node_id, std::shared_ptr<Connection> conn) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
+    
+    // Check if we already have a connection for this node
+    if (connections_.count(node_id) > 0) {
+        std::cout << "[DEBUG] Already connected to node " << node_id << ". Closing duplicate." << std::endl;
+        conn->close();
+        return;
+    }
+    
     connections_[node_id] = conn;
     fd_to_node_[conn->socket_fd()] = node_id;
     

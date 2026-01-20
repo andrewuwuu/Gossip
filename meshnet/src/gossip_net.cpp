@@ -97,15 +97,15 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
     
     const auto& e = pending_events.front();
     
-    event->event_type = static_cast<int>(e.type);
-    event->peer_id = e.peer_id;
-    event->error_code = e.error_code;
+    event->event_type = static_cast<int32_t>(e.type);
+    event->peer_id = static_cast<uint32_t>(e.peer_id);
+    event->error_code = static_cast<int32_t>(e.error_code);
     
     std::memset(event->username, 0, sizeof(event->username));
     std::strncpy(event->username, e.username.c_str(), sizeof(event->username) - 1);
     
     std::memset(event->data, 0, sizeof(event->data));
-    event->data_len = std::min(e.data.size(), sizeof(event->data));
+    event->data_len = static_cast<uint32_t>(std::min(e.data.size(), (size_t)GOSSIP_MAX_MESSAGE_LEN));
     if (event->data_len > 0) {
         std::memcpy(event->data, e.data.data(), event->data_len);
     }

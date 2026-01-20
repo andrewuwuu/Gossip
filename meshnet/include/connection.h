@@ -78,7 +78,7 @@ public:
     std::shared_ptr<Connection> connect_to(const std::string& addr, uint16_t port);
     void register_connection(uint16_t node_id, std::shared_ptr<Connection> conn);
     void disconnect(uint16_t node_id);
-    void broadcast(const Packet& packet);
+    void broadcast(const Packet& packet, uint16_t exclude_node_id = 0);
     bool send_to(uint16_t node_id, const Packet& packet);
     
     void set_connection_callback(std::function<void(std::shared_ptr<Connection>)> cb) {
