@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -203,7 +205,7 @@ func (h *MessageHandler) saveHistory() {
 }
 
 func generateMessageID() string {
-	var buf [8]byte
-	_, _ = os.Stdin.Read(buf[:])
-	return string(buf[:])
+	b := make([]byte, 8)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
