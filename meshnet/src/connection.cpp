@@ -316,11 +316,22 @@ void ConnectionManager::poll(int timeout_ms) {
             accept_connections();
         } else {
             std::lock_guard<std::mutex> lock(connections_mutex_);
-            auto fd_it = fd_to_node_.find(events[i].data.fd);
+            int fd = events[i].data.fd;
+            
+            // First check registered connections
+            auto fd_it = fd_to_node_.find(fd);
             if (fd_it != fd_to_node_.end()) {
                 auto conn_it = connections_.find(fd_it->second);
                 if (conn_it != connections_.end()) {
                     conn_it->second->process_incoming();
+                }
+            } else {
+                // Check unregistered connections
+                for (auto& conn : unregistered_connections_) {
+                    if (conn->socket_fd() == fd) {
+                        conn->process_incoming();
+                        break;
+                    }
                 }
             }
         }
