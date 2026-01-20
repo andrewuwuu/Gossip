@@ -401,7 +401,12 @@ void MeshNode::handle_discovery() {
             if (packet.payload().size() >= 2) {
                 const uint8_t* data = packet.payload().data();
                 uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
-                connect_to_peer(addr_str, peer_port);
+                
+                // Tie-breaker: only connect if our node_id > their node_id
+                // This prevents BOTH nodes from connecting to each other simultaneously
+                if (node_id_ > packet.source_id()) {
+                    connect_to_peer(addr_str, peer_port);
+                }
             }
         } else if (packet.type() == PacketType::ANNOUNCE) {
             std::cout << "[DEBUG] Got UDP ANNOUNCE from " << packet.source_id() << " at " << addr_str << std::endl;
