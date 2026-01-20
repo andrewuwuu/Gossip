@@ -161,6 +161,7 @@ ConnectionManager::~ConnectionManager() {
 bool ConnectionManager::start() {
     listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd_ < 0) {
+        std::cerr << "[ERROR] Failed to create listen socket: " << strerror(errno) << std::endl;
         return false;
     }
     
@@ -168,6 +169,7 @@ bool ConnectionManager::start() {
     setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     
     if (!set_nonblocking(listen_fd_)) {
+        std::cerr << "[ERROR] Failed to set listen socket non-blocking: " << strerror(errno) << std::endl;
         ::close(listen_fd_);
         listen_fd_ = -1;
         return false;
@@ -179,12 +181,14 @@ bool ConnectionManager::start() {
     addr.sin_port = htons(listen_port_);
     
     if (bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+        std::cerr << "[ERROR] Failed to bind listen socket to port " << listen_port_ << ": " << strerror(errno) << std::endl;
         ::close(listen_fd_);
         listen_fd_ = -1;
         return false;
     }
     
     if (listen(listen_fd_, 128) < 0) {
+        std::cerr << "[ERROR] Failed to listen on socket: " << strerror(errno) << std::endl;
         ::close(listen_fd_);
         listen_fd_ = -1;
         return false;
@@ -192,6 +196,7 @@ bool ConnectionManager::start() {
     
     epoll_fd_ = epoll_create1(0);
     if (epoll_fd_ < 0) {
+        std::cerr << "[ERROR] Failed to create epoll instance: " << strerror(errno) << std::endl;
         ::close(listen_fd_);
         listen_fd_ = -1;
         return false;
@@ -200,9 +205,17 @@ bool ConnectionManager::start() {
     epoll_event ev{};
     ev.events = EPOLLIN;
     ev.data.fd = listen_fd_;
-    epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, listen_fd_, &ev);
+    if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, listen_fd_, &ev) < 0) {
+        std::cerr << "[ERROR] Failed to add listen socket to epoll: " << strerror(errno) << std::endl;
+        ::close(listen_fd_);
+        ::close(epoll_fd_);
+        listen_fd_ = -1;
+        epoll_fd_ = -1;
+        return false;
+    }
     
     running_ = true;
+    std::cout << "[DEBUG] ConnectionManager started on port " << listen_port_ << std::endl;
     return true;
 }
 

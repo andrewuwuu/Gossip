@@ -67,11 +67,13 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     });
     
     if (!conn_manager_->start()) {
+        std::cerr << "[ERROR] ConnectionManager failed to start" << std::endl;
         return false;
     }
     
     discovery_socket_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (discovery_socket_ < 0) {
+        std::cerr << "[ERROR] Failed to create discovery socket: " << strerror(errno) << std::endl;
         conn_manager_->stop();
         return false;
     }
@@ -89,6 +91,7 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     bind_addr.sin_port = htons(discovery_port);
     
     if (bind(discovery_socket_, reinterpret_cast<sockaddr*>(&bind_addr), sizeof(bind_addr)) < 0) {
+        std::cerr << "[ERROR] Failed to bind discovery socket to port " << discovery_port << ": " << strerror(errno) << std::endl;
         ::close(discovery_socket_);
         discovery_socket_ = -1;
         conn_manager_->stop();
@@ -96,6 +99,7 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     }
     
     running_ = true;
+    std::cout << "[DEBUG] MeshNode started. Discovery on port " << discovery_port << std::endl;
     return true;
 }
 
