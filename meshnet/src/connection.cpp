@@ -89,29 +89,36 @@ void Connection::process_incoming() {
     }
     
     uint8_t buffer[4096];
-    ssize_t n = ::recv(socket_fd_, buffer, sizeof(buffer), 0);
     
-    if (n < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+    while (true) {
+        ssize_t n = ::recv(socket_fd_, buffer, sizeof(buffer), 0);
+        
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            }
+            std::cout << "[DEBUG] Recv error: " << strerror(errno) << std::endl;
             state_ = State::ERROR;
             if (disconnect_callback_) {
                 disconnect_callback_();
             }
+            return;
         }
-        return;
-    }
-    
-    if (n == 0) {
-        state_ = State::DISCONNECTED;
-        if (disconnect_callback_) {
-            disconnect_callback_();
+        
+        if (n == 0) {
+            std::cout << "[DEBUG] Connection closed by peer" << std::endl;
+            state_ = State::DISCONNECTED;
+            if (disconnect_callback_) {
+                disconnect_callback_();
+            }
+            return;
         }
-        return;
-    }
-    
-    recv_buffer_.insert(recv_buffer_.end(), buffer, buffer + n);
-    
-    while (try_parse_packet()) {
+        
+        // std::cout << "[DEBUG] Received " << n << " bytes" << std::endl;
+        recv_buffer_.insert(recv_buffer_.end(), buffer, buffer + n);
+        
+        while (try_parse_packet()) {
+        }
     }
 }
 
