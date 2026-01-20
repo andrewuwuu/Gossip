@@ -53,6 +53,7 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
         conn->set_disconnect_callback([this, conn]() {
             MeshEvent event;
             event.type = MeshEvent::Type::PEER_DISCONNECTED;
+            event.peer_id = conn->node_id();
             push_event(std::move(event));
         });
         
@@ -192,6 +193,7 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     conn->set_disconnect_callback([this, conn]() {
         MeshEvent event;
         event.type = MeshEvent::Type::PEER_DISCONNECTED;
+        event.peer_id = conn->node_id();
         push_event(std::move(event));
     });
     
@@ -286,6 +288,7 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
                 uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
                 
                 // Register this connection with the node ID
+                conn->set_node_id(from_id);
                 conn_manager_->register_connection(from_id, conn);
                 
                 // Remove from pending if it was there

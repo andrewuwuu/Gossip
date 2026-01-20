@@ -47,12 +47,17 @@ public:
     uint16_t peer_port() const { return peer_port_; }
     State state() const { return state_.load(); }
     
+    // Node ID (set after ANNOUNCE is received)
+    uint16_t node_id() const { return node_id_; }
+    void set_node_id(uint16_t id) { node_id_ = id; }
+    
     void close();
 
 private:
     int socket_fd_;
     std::string peer_addr_;
     uint16_t peer_port_;
+    uint16_t node_id_ = 0;
     std::atomic<State> state_;
     
     std::vector<uint8_t> recv_buffer_;
