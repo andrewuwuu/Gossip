@@ -72,6 +72,11 @@ public:
         header_.sequence = next_sequence_++;
         header_.payload_length = 0;
     }
+
+    Packet(PacketHeader header, std::vector<uint8_t> payload)
+        : header_(header), payload_(std::move(payload)) {
+        header_.payload_length = static_cast<uint16_t>(payload_.size());
+    }
     
     bool set_payload(const uint8_t* data, size_t len) {
         if (len > MAX_PAYLOAD_SIZE) return false;
@@ -157,9 +162,8 @@ struct MessagePayload {
         std::vector<uint8_t> buffer;
         buffer.reserve(2 + 1 + username.size() + message.size());
         
-        uint16_t net_dest = htons(dest_id);
-        buffer.push_back(static_cast<uint8_t>(net_dest >> 8));
-        buffer.push_back(static_cast<uint8_t>(net_dest & 0xFF));
+        buffer.push_back(static_cast<uint8_t>((dest_id >> 8) & 0xFF));
+        buffer.push_back(static_cast<uint8_t>(dest_id & 0xFF));
         
         buffer.push_back(static_cast<uint8_t>(username.size()));
         buffer.insert(buffer.end(), username.begin(), username.end());
@@ -171,7 +175,7 @@ struct MessagePayload {
     static bool deserialize(const uint8_t* data, size_t len, MessagePayload& out) {
         if (len < 3) return false;
         
-        out.dest_id = ntohs(*reinterpret_cast<const uint16_t*>(data));
+        out.dest_id = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
         uint8_t username_len = data[2];
         
         if (len < 3 + username_len) return false;

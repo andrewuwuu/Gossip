@@ -114,7 +114,7 @@ void Connection::process_incoming() {
             return;
         }
         
-        // std::cout << "[DEBUG] Received " << n << " bytes" << std::endl;
+        std::cout << "[DEBUG] Received " << n << " bytes" << std::endl;
         recv_buffer_.insert(recv_buffer_.end(), buffer, buffer + n);
         
         while (try_parse_packet()) {
@@ -127,17 +127,38 @@ bool Connection::try_parse_packet() {
         return false;
     }
     
-    Packet packet;
-    if (!Packet::deserialize(recv_buffer_.data(), recv_buffer_.size(), packet)) {
-        if (recv_buffer_[0] != MAGIC_BYTE) {
-            recv_buffer_.erase(recv_buffer_.begin());
-            return true;
-        }
+    PacketHeader header;
+    std::memcpy(&header, recv_buffer_.data(), HEADER_SIZE);
+    
+    // Check Magic Byte first (no endian swap needed for byte)
+    if (header.magic != MAGIC_BYTE) {
+        std::cout << "[ERROR] Invalid magic byte: " << std::hex << (int)header.magic << std::dec << std::endl;
+        // Optimization: Drop 1 byte and retry to resync? Or drop connection?
+        // For now, just drop connection as protocol violation
+        recv_buffer_.clear(); 
+        return false;
+    }
+
+    // Convert to host order to check length
+    PacketHeader host_header = header;
+    host_header.to_host_order();
+    
+    size_t total_size = HEADER_SIZE + host_header.payload_length;
+    if (recv_buffer_.size() < total_size) {
+        // Wait for more data
         return false;
     }
     
-    size_t packet_size = packet.total_size();
-    recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + packet_size);
+    // We have a full packet
+    std::vector<uint8_t> payload(
+        recv_buffer_.begin() + HEADER_SIZE,
+        recv_buffer_.begin() + total_size
+    );
+    
+    Packet packet(host_header, payload);
+    
+    // Remove from buffer
+    recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + total_size);
     
     if (packet_callback_) {
         packet_callback_(packet);
