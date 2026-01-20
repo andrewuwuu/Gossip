@@ -11,6 +11,7 @@ import "C"
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"unsafe"
 )
@@ -282,6 +283,9 @@ func (m *MeshNet) eventLoop() {
 					Username:  C.GoString(&cEvent.username[0]),
 					ErrorCode: int(cEvent.error_code),
 				}
+
+				// DEBUG: Log what Go actually receives
+				fmt.Printf("[DEBUG] Go received: type=%d peer_id=%d\n", event.Type, event.PeerID)
 
 				if cEvent.data_len > 0 {
 					event.Data = C.GoBytes(unsafe.Pointer(&cEvent.data[0]), C.int(cEvent.data_len))
