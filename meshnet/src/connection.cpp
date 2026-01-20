@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <cerrno>
 #include <cstring>
+#include <algorithm>
 
 namespace gossip {
 
@@ -281,6 +282,27 @@ void ConnectionManager::broadcast(const Packet& packet) {
     }
 }
 
+void ConnectionManager::register_connection(uint16_t node_id, std::shared_ptr<Connection> conn) {
+    std::lock_guard<std::mutex> lock(connections_mutex_);
+    connections_[node_id] = conn;
+    fd_to_node_[conn->socket_fd()] = node_id;
+    
+    // Remove from unregistered list
+    unregistered_connections_.erase(
+        std::remove(unregistered_connections_.begin(), unregistered_connections_.end(), conn),
+        unregistered_connections_.end()
+    );
+}
+
+bool ConnectionManager::send_to(uint16_t node_id, const Packet& packet) {
+    std::lock_guard<std::mutex> lock(connections_mutex_);
+    auto it = connections_.find(node_id);
+    if (it != connections_.end()) {
+        return it->second->send(packet);
+    }
+    return false;
+}
+
 void ConnectionManager::poll(int timeout_ms) {
     if (!running_ || epoll_fd_ < 0) {
         return;
@@ -349,6 +371,11 @@ void ConnectionManager::accept_connections() {
         ev.events = EPOLLIN | EPOLLET;
         ev.data.fd = client_fd;
         epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &ev);
+        
+        {
+            std::lock_guard<std::mutex> lock(connections_mutex_);
+            unregistered_connections_.push_back(conn);
+        }
         
         if (connection_callback_) {
             connection_callback_(conn);

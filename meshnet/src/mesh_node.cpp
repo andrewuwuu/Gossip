@@ -46,7 +46,7 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     
     conn_manager_->set_connection_callback([this](std::shared_ptr<Connection> conn) {
         conn->set_packet_callback([this, conn](const Packet& packet) {
-            handle_packet(packet.source_id(), packet);
+            handle_packet(conn, packet);
         });
         
         conn->set_disconnect_callback([this, conn]() {
@@ -54,6 +54,15 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
             event.type = MeshEvent::Type::PEER_DISCONNECTED;
             push_event(std::move(event));
         });
+        
+        // Send our ANNOUNCE to the new connection
+        Packet announce(PacketType::ANNOUNCE, node_id_);
+        std::vector<uint8_t> payload;
+        uint16_t net_port = htons(listen_port_);
+        payload.push_back(static_cast<uint8_t>(net_port >> 8));
+        payload.push_back(static_cast<uint8_t>(net_port & 0xFF));
+        announce.set_payload(payload);
+        conn->send(announce);
     });
     
     if (!conn_manager_->start()) {
@@ -126,13 +135,7 @@ bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
         return false;
     }
     
-    std::lock_guard<std::mutex> lock(peers_mutex_);
-    auto it = peers_.find(dest_id);
-    if (it == peers_.end()) {
-        return false;
-    }
-    
-    return true;
+    return conn_manager_->send_to(dest_id, packet);
 }
 
 bool MeshNode::broadcast_message(const std::string& username, const std::string& message) {
@@ -162,8 +165,25 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
         return false;
     }
     
-    Packet announce(PacketType::ANNOUNCE, node_id_);
+    // Store in pending until we get their ANNOUNCE
+    {
+        std::lock_guard<std::mutex> lock(pending_mutex_);
+        pending_connections_[conn->socket_fd()] = conn;
+    }
     
+    // Set up callbacks
+    conn->set_packet_callback([this, conn](const Packet& packet) {
+        handle_packet(conn, packet);
+    });
+    
+    conn->set_disconnect_callback([this, conn]() {
+        MeshEvent event;
+        event.type = MeshEvent::Type::PEER_DISCONNECTED;
+        push_event(std::move(event));
+    });
+    
+    // Send our ANNOUNCE
+    Packet announce(PacketType::ANNOUNCE, node_id_);
     std::vector<uint8_t> payload;
     uint16_t net_port = htons(listen_port_);
     payload.push_back(static_cast<uint8_t>(net_port >> 8));
@@ -171,10 +191,6 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     announce.set_payload(payload);
     
     conn->send(announce);
-    
-    conn->set_packet_callback([this](const Packet& packet) {
-        handle_packet(packet.source_id(), packet);
-    });
     
     return true;
 }
@@ -226,14 +242,17 @@ void MeshNode::poll_events(int timeout_ms) {
     }
 }
 
-void MeshNode::handle_packet(uint16_t from_id, const Packet& packet) {
+void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& packet) {
     if (is_duplicate(packet.source_id(), packet.sequence())) {
         return;
     }
     
+    uint16_t from_id = packet.source_id();
+    
     switch (packet.type()) {
         case PacketType::PING: {
             Packet pong(PacketType::PONG, node_id_);
+            conn->send(pong);
             break;
         }
         
@@ -252,8 +271,18 @@ void MeshNode::handle_packet(uint16_t from_id, const Packet& packet) {
                     *reinterpret_cast<const uint16_t*>(packet.payload().data())
                 );
                 
+                // Register this connection with the node ID
+                conn_manager_->register_connection(from_id, conn);
+                
+                // Remove from pending if it was there
+                {
+                    std::lock_guard<std::mutex> lock(pending_mutex_);
+                    pending_connections_.erase(conn->socket_fd());
+                }
+                
                 PeerInfo info;
-                info.node_id = packet.source_id();
+                info.node_id = from_id;
+                info.address = conn->peer_addr();
                 info.port = peer_port;
                 info.last_seen = current_time_ms();
                 info.hop_count = 1;
@@ -279,7 +308,7 @@ void MeshNode::handle_packet(uint16_t from_id, const Packet& packet) {
                 if (msg.dest_id == 0 || msg.dest_id == node_id_) {
                     MeshEvent event;
                     event.type = MeshEvent::Type::MESSAGE_RECEIVED;
-                    event.peer_id = packet.source_id();
+                    event.peer_id = from_id;
                     event.username = msg.username;
                     event.data.assign(msg.message.begin(), msg.message.end());
                     push_event(std::move(event));
@@ -291,6 +320,7 @@ void MeshNode::handle_packet(uint16_t from_id, const Packet& packet) {
                         ack_payload.resize(4);
                         std::memcpy(ack_payload.data(), &net_seq, 4);
                         ack.set_payload(ack_payload);
+                        conn->send(ack);
                     }
                 }
                 
@@ -304,7 +334,7 @@ void MeshNode::handle_packet(uint16_t from_id, const Packet& packet) {
         case PacketType::MESSAGE_ACK: {
             MeshEvent event;
             event.type = MeshEvent::Type::MESSAGE_ACK;
-            event.peer_id = packet.source_id();
+            event.peer_id = from_id;
             push_event(std::move(event));
             break;
         }
@@ -312,7 +342,7 @@ void MeshNode::handle_packet(uint16_t from_id, const Packet& packet) {
         case PacketType::FORWARD: {
             Packet inner;
             if (Packet::deserialize(packet.payload().data(), packet.payload().size(), inner)) {
-                handle_packet(from_id, inner);
+                handle_packet(conn, inner);
             }
             break;
         }
@@ -411,11 +441,8 @@ void MeshNode::forward_packet(const Packet& packet, uint16_t exclude_peer) {
     auto serialized = packet.serialize();
     forward.set_payload(serialized);
     
-    std::lock_guard<std::mutex> lock(peers_mutex_);
-    for (const auto& [id, _] : peers_) {
-        if (id != exclude_peer && id != packet.source_id()) {
-        }
-    }
+    // Broadcast to all peers except the one we got it from
+    conn_manager_->broadcast(forward);
 }
 
 void MeshNode::push_event(MeshEvent event) {

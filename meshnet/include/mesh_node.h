@@ -90,7 +90,10 @@ private:
     std::unordered_set<uint32_t> seen_sequences_;
     std::mutex seen_mutex_;
     
-    void handle_packet(uint16_t from_id, const Packet& packet);
+    std::mutex pending_mutex_;
+    std::unordered_map<int, std::shared_ptr<Connection>> pending_connections_;
+    
+    void handle_packet(std::shared_ptr<Connection> conn, const Packet& packet);
     void handle_discovery();
     void send_announce(const std::string& to_addr, uint16_t to_port);
     void forward_packet(const Packet& packet, uint16_t exclude_peer);

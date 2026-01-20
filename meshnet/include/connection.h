@@ -76,8 +76,10 @@ public:
     void stop();
     
     std::shared_ptr<Connection> connect_to(const std::string& addr, uint16_t port);
+    void register_connection(uint16_t node_id, std::shared_ptr<Connection> conn);
     void disconnect(uint16_t node_id);
     void broadcast(const Packet& packet);
+    bool send_to(uint16_t node_id, const Packet& packet);
     
     void set_connection_callback(std::function<void(std::shared_ptr<Connection>)> cb) {
         connection_callback_ = std::move(cb);
@@ -97,6 +99,7 @@ private:
     mutable std::mutex connections_mutex_;
     std::unordered_map<uint16_t, std::shared_ptr<Connection>> connections_;
     std::unordered_map<int, uint16_t> fd_to_node_;
+    std::vector<std::shared_ptr<Connection>> unregistered_connections_;
     
     std::function<void(std::shared_ptr<Connection>)> connection_callback_;
     
