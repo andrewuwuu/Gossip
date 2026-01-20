@@ -8,16 +8,16 @@
 extern "C" {
 #endif
 
-#define GOSSIP_EVENT_PEER_CONNECTED    1
-#define GOSSIP_EVENT_PEER_DISCONNECTED 2
-#define GOSSIP_EVENT_MESSAGE_RECEIVED  3
-#define GOSSIP_EVENT_MESSAGE_ACK       4
-#define GOSSIP_EVENT_ERROR             5
+#define GOSSIP_EVENT_PEER_CONNECTED    0
+#define GOSSIP_EVENT_PEER_DISCONNECTED 1
+#define GOSSIP_EVENT_MESSAGE_RECEIVED  2
+#define GOSSIP_EVENT_MESSAGE_ACK       3
+#define GOSSIP_EVENT_ERROR             4
 
 #define GOSSIP_MAX_USERNAME_LEN  64
 #define GOSSIP_MAX_MESSAGE_LEN   16384
 
-typedef struct {
+typedef struct GossipEvent {
     int event_type;
     uint16_t peer_id;
     char username[GOSSIP_MAX_USERNAME_LEN];
@@ -26,7 +26,7 @@ typedef struct {
     int error_code;
 } GossipEvent;
 
-typedef struct {
+typedef struct GossipPeerInfo {
     uint16_t node_id;
     char address[46];  // IPv6 max length
     uint16_t port;

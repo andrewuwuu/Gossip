@@ -275,7 +275,7 @@ func (m *MeshNet) eventLoop() {
 			return
 		default:
 			result := C.gossip_poll_event(&cEvent, 100)
-			if result == 0 && cEvent.event_type != 0 {
+			if result == 1 {
 				event := Event{
 					Type:      EventType(cEvent.event_type),
 					PeerID:    uint16(cEvent.peer_id),
