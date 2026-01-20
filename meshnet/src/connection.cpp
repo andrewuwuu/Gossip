@@ -363,24 +363,33 @@ void ConnectionManager::poll(int timeout_ms) {
         if (events[i].data.fd == listen_fd_) {
             accept_connections();
         } else {
-            std::lock_guard<std::mutex> lock(connections_mutex_);
+            std::shared_ptr<Connection> conn_to_process;
             int fd = events[i].data.fd;
             
-            // First check registered connections
-            auto fd_it = fd_to_node_.find(fd);
-            if (fd_it != fd_to_node_.end()) {
-                auto conn_it = connections_.find(fd_it->second);
-                if (conn_it != connections_.end()) {
-                    conn_it->second->process_incoming();
-                }
-            } else {
-                // Check unregistered connections
-                for (auto& conn : unregistered_connections_) {
-                    if (conn->socket_fd() == fd) {
-                        conn->process_incoming();
-                        break;
+            {
+                std::lock_guard<std::mutex> lock(connections_mutex_);
+                
+                // First check registered connections
+                auto fd_it = fd_to_node_.find(fd);
+                if (fd_it != fd_to_node_.end()) {
+                    auto conn_it = connections_.find(fd_it->second);
+                    if (conn_it != connections_.end()) {
+                        conn_to_process = conn_it->second;
+                    }
+                } else {
+                    // Check unregistered connections
+                    for (auto& conn : unregistered_connections_) {
+                        if (conn->socket_fd() == fd) {
+                            conn_to_process = conn;
+                            break;
+                        }
                     }
                 }
+            }
+            
+            // Release lock before processing to avoid deadlock
+            if (conn_to_process) {
+                conn_to_process->process_incoming();
             }
         }
     }
