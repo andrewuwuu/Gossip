@@ -9,6 +9,12 @@ static std::unique_ptr<gossip::MeshNode> g_node;
 
 extern "C" {
 
+/*
+ * Implementation: gossip_init
+ * 
+ * Creates the global MeshNode instance. This is a singleton-like pattern
+ * where g_node holds the state of the network layer.
+ */
 int gossip_init(uint16_t node_id) {
     if (g_node) {
         return -1;
@@ -18,6 +24,12 @@ int gossip_init(uint16_t node_id) {
     return 0;
 }
 
+/*
+ * Implementation: gossip_start
+ * 
+ * Bridges the C API call to the C++ MeshNode::start method.
+ * Returns failure if the node hasn't been initialized via gossip_init.
+ */
 int gossip_start(uint16_t listen_port, uint16_t discovery_port) {
     if (!g_node) {
         return -1;
@@ -73,6 +85,17 @@ int gossip_broadcast(const char* username, const char* message, size_t message_l
     return g_node->broadcast_message(username, msg) ? 0 : -1;
 }
 
+/*
+ * Implementation: gossip_poll_event
+ * 
+ * Retrieves events from the internal C++ event queue and populates the
+ * C-compatible GossipEvent struct.
+ * 
+ * STRUCT ALIGNMENT NOTE:
+ * We perform manual field assignment and casting here to ensure that data
+ * is correctly marshaled into the 64-bit aligned C struct. This is critical
+ * for CGo hash/memory compatibility between Go and C++.
+ */
 int gossip_poll_event(GossipEvent* event, int timeout_ms) {
     if (!g_node || !event) {
         return -1;
@@ -80,11 +103,7 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
     
     static std::queue<gossip::MeshEvent> pending_events;
     
-    // Only set callback if queue is empty (to avoid overwriting if not needed, 
-    // though overwriting with same lambda is fine).
-    // Actually, we must ensure we capture events even when we are not polling?
-    // No, poll_events drives the loop.
-    
+    // Set up the callback to capture events from the MeshNode
     g_node->set_event_callback([&](const gossip::MeshEvent& e) {
         pending_events.push(e);
     });
@@ -106,13 +125,14 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
     // ALWAYS zero the struct first to prevent memory bleed from previous events
     std::memset(event, 0, sizeof(GossipEvent));
     
-    event->event_type = static_cast<int32_t>(e.type);
-    event->peer_id = static_cast<uint32_t>(e.peer_id);
-    event->error_code = static_cast<int32_t>(e.error_code);
+    // Use 64-bit casts to match the naturally aligned struct layout
+    event->event_type = static_cast<int64_t>(e.type);
+    event->peer_id = static_cast<uint64_t>(e.peer_id);
+    event->error_code = static_cast<int64_t>(e.error_code);
     
     std::strncpy(event->username, e.username.c_str(), sizeof(event->username) - 1);
     
-    event->data_len = static_cast<uint32_t>(std::min(e.data.size(), (size_t)GOSSIP_MAX_MESSAGE_LEN));
+    event->data_len = static_cast<uint64_t>(std::min(e.data.size(), (size_t)GOSSIP_MAX_MESSAGE_LEN));
     if (event->data_len > 0) {
         std::memcpy(event->data, e.data.data(), event->data_len);
     }

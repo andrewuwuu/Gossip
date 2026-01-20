@@ -13,7 +13,7 @@ Gossip uses a hybrid architecture:
 - [x] **Automatic Peer Discovery**: Uses UDP broadcasting to find other nodes on the local network.
 - [x] **Mesh Routing**: Nodes automatically forward messages to reach peers not in direct range.
 - [x] **Reliable Transport**: TCP-based connections with custom packet framing and heartbeat.
-- [x] **Cross-Platform Support**: Optimized for Linux (WSL2) and Android (Termux).
+- [x] **Cross-Platform Support**: Optimized for Linux (WSL2), Linux (Native), and Android (Termux).
 - [ ] **Encryption**: (Planned) P2P encryption using ChaCha20-Poly1305.
 
 ## Project Structure

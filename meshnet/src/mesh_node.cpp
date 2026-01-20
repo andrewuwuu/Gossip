@@ -39,6 +39,14 @@ MeshNode::~MeshNode() {
     stop();
 }
 
+/*
+ * Implementation: start
+ * 
+ * Initializes the MeshNode.
+ * 1. Starts the ConnectionManager (TCP)
+ * 2. Sets up connection callbacks (packet handling, disconnects)
+ * 3. Creates and binds the UDP discovery socket
+ */
 bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     listen_port_ = listen_port;
     discovery_port_ = discovery_port;
@@ -121,6 +129,13 @@ void MeshNode::stop() {
     peers_.clear();
 }
 
+/*
+ * Implementation: send_message
+ * 
+ * Constructs a MESSAGE packet and sends it to a specific destination.
+ * - Serializes payload (dest_id, username, content)
+ * - Delegates actual transmission to ConnectionManager
+ */
 bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
                             const std::string& message, bool require_ack) {
     if (!running_) return false;
@@ -169,6 +184,14 @@ bool MeshNode::broadcast_message(const std::string& username, const std::string&
     return true;
 }
 
+/*
+ * Implementation: connect_to_peer
+ * 
+ * Initiates a TCP connection to a remote peer.
+ * - Establishes socket connection
+ * - Registers callbacks
+ * - Sends immediate ANNOUNCE packet to identify ourselves
+ */
 bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     if (!running_) return false;
     std::cout << "[DEBUG] Connecting to peer " << addr << ":" << port << std::endl;
@@ -209,6 +232,12 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     return true;
 }
 
+/*
+ * Implementation: discover_peers
+ * 
+ * Broadcasts a UDP DISCOVER packet to the local network.
+ * Peers receiving this will respond with their info.
+ */
 void MeshNode::discover_peers() {
     if (!running_ || discovery_socket_ < 0) return;
     std::cout << "[DEBUG] Broadcasting discovery packet" << std::endl;
@@ -241,6 +270,14 @@ std::vector<PeerInfo> MeshNode::get_peers() const {
     return result;
 }
 
+/*
+ * Implementation: poll_events
+ * 
+ * Main driving loop for the MeshNode.
+ * 1. Drives ConnectionManager poll
+ * 2. Checks for UDP discovery packets
+ * 3. Dispatches queued events to the application callback
+ */
 void MeshNode::poll_events(int timeout_ms) {
     if (!running_) return;
     
@@ -256,6 +293,14 @@ void MeshNode::poll_events(int timeout_ms) {
     }
 }
 
+/*
+ * Implementation: handle_packet
+ * 
+ * Core packet processing logic.
+ * - Checks for duplicates (deduplication)
+ * - Dispatches based on packet type (PING, MESSAGE, ANNOUNCE, etc.)
+ * - Handles routing (forwarding broadcast messages)
+ */
 void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& packet) {
     if (is_duplicate(packet.source_id(), packet.sequence())) {
         return;

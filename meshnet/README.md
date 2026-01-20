@@ -37,7 +37,7 @@ The network layer is built as a shared/static C++ library (`libgossipnet`) that 
 ## CGo Integration
 
 The C++ layer exposes a flat C API in `include/gossip_net.h`.
-Critically, the `GossipEvent` struct uses `#pragma pack(1)` to ensure memory layout parity between C++ and Go across different architectures (x86_64 vs aarch64).
+Critically, the `GossipEvent` struct uses **naturally aligned 64-bit fields** to ensure memory layout parity between C++ and Go across different architectures (x86_64 vs aarch64). This avoids the performance penalty of `#pragma pack(1)` while maintaining identical field offsets for CGo.
 
 ## Build System
 

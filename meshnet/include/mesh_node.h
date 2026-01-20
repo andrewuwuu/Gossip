@@ -18,6 +18,12 @@
 
 namespace gossip {
 
+/*
+ * PeerInfo
+ * 
+ * Tracks metadata about a known peer in the mesh network.
+ * Used for routing and discovery state.
+ */
 struct PeerInfo {
     uint16_t node_id;
     std::string address;
@@ -26,6 +32,12 @@ struct PeerInfo {
     int hop_count;
 };
 
+/*
+ * MeshEvent
+ * 
+ * Represents a high-level network event to be consumed by the application layer.
+ * These events are queued and polled by the main application thread.
+ */
 struct MeshEvent {
     enum class Type {
         PEER_CONNECTED,
@@ -42,6 +54,16 @@ struct MeshEvent {
     int error_code = 0;
 };
 
+/*
+ * MeshNode
+ * 
+ * The central controller for the P2P node.
+ * Integrates:
+ * - UDP Discovery: Finds peers on LAN
+ * - TCP Connection Manager: Maintains reliable links
+ * - Routing Logic: Forwards packets through the mesh
+ * - Event System: Queues events for the application
+ */
 class MeshNode {
 public:
     using EventCallback = std::function<void(const MeshEvent&)>;

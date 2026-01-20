@@ -60,6 +60,15 @@ bool Connection::send(const Packet& packet) {
     return send_raw(data.data(), data.size());
 }
 
+/*
+ * Implementation: send_raw
+ * 
+ * Writes data to the non-blocking socket.
+ * - Handles EAGAIN/EWOULDBLOCK by returning early (retry logic needed by caller? 
+ *   Currently returns false, effectively dropping packet if socket full?)
+ * - Note: This implementation busy-waits on partial writes unless EAGAIN occurs.
+ *   For robust ness, partial writes should be buffered.
+ */
 bool Connection::send_raw(const uint8_t* data, size_t len) {
     if (state_ != State::CONNECTED || socket_fd_ < 0) {
         return false;
@@ -83,6 +92,14 @@ bool Connection::send_raw(const uint8_t* data, size_t len) {
     return true;
 }
 
+/*
+ * Implementation: process_incoming
+ * 
+ * Reads raw bytes from the socket into recv_buffer_.
+ * - Handles non-blocking reads (loop until EAGAIN)
+ * - Detects connection closure (recv == 0) and error states
+ * - Triggers try_parse_packet() loop to extract full messages from stream
+ */
 void Connection::process_incoming() {
     if (state_ != State::CONNECTED || socket_fd_ < 0) {
         return;
@@ -186,6 +203,14 @@ ConnectionManager::~ConnectionManager() {
     stop();
 }
 
+/*
+ * Implementation: start
+ * 
+ * Initializes the listening socket and epoll instance.
+ * - Sets non-blocking mode
+ * - Binds to the configured port
+ * - Registers the listen socket with epoll for incoming connection events
+ */
 bool ConnectionManager::start() {
     listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd_ < 0) {
@@ -361,6 +386,15 @@ bool ConnectionManager::send_to(uint16_t node_id, const Packet& packet) {
     return false;
 }
 
+/*
+ * Implementation: poll
+ * 
+ * Main event loop driver.
+ * - Waits for epoll events (with timeout)
+ * - Handles new connections on listen_fd_
+ * - Dispatches incoming data events to specific Connection objects
+ * - Manages thread-safety when accessing the connections map
+ */
 void ConnectionManager::poll(int timeout_ms) {
     if (!running_ || epoll_fd_ < 0) {
         return;

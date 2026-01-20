@@ -32,6 +32,23 @@ enum PacketFlag : uint8_t {
     FLAG_COMPRESSED  = 0x08
 };
 
+
+
+/*
+ * PacketHeader
+ * 
+ * Represents the standardized 12-byte header for all network packets.
+ * Uses #pragma pack(1) to ensure exact binary layout on the wire.
+ * 
+ * Fields:
+ * - magic: Validation byte (0x47)
+ * - version: Protocol version (0x01)
+ * - type: PacketType enum value
+ * - flags: Bitwise OR of PacketFlag values
+ * - payload_length: Size of the variable data following the header
+ * - sequence: Monotonically increasing ID for duplicate detection
+ * - source_id: Node ID of the sender
+ */
 #pragma pack(push, 1)
 struct PacketHeader {
     uint8_t magic;
@@ -58,6 +75,17 @@ struct PacketHeader {
 
 static_assert(sizeof(PacketHeader) == HEADER_SIZE, "PacketHeader must be exactly 12 bytes");
 
+static_assert(sizeof(PacketHeader) == HEADER_SIZE, "PacketHeader must be exactly 12 bytes");
+
+/*
+ * Packet
+ * 
+ * Wrapper class for managing network packets. Handles serialization,
+ * deserialization, and byte-order conversion (Network <-> Host).
+ * 
+ * The serialized format is:
+ * [Header (12 bytes)] + [Payload (variable)]
+ */
 class Packet {
 public:
     Packet() = default;
@@ -154,6 +182,14 @@ private:
 };
 
 struct MessagePayload {
+    /*
+     * MessagePayload
+     * 
+     * Helper struct for parsing the variable-length payload of MESSAGE packets.
+     * 
+     * Binary Format:
+     * [DestID (2 bytes)] [UsernameLen (1 byte)] [Username (N bytes)] [MessageContent (Remaining)]
+     */
     uint16_t dest_id;
     std::string username;
     std::string message;

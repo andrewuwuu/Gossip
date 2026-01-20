@@ -14,6 +14,16 @@
 
 namespace gossip {
 
+/*
+ * Connection
+ * 
+ * Represents a single TCP connection to a peer node.
+ * Handles non-blocking I/O, packet serialization/deserialization,
+ * and maintains the lifecycle of the socket connection.
+ * 
+ * This class is thread-safe for sending (via mutex), but receving
+ * is driven by the single-threaded ConnectionManager event loop.
+ */
 class Connection {
 public:
     enum class State {
@@ -34,12 +44,26 @@ public:
     Connection(Connection&& other) noexcept;
     Connection& operator=(Connection&& other) noexcept;
 
+    /*
+     * Queues a packet for sending.
+     * Thread-safe.
+     * @return true if enqueued/sent successfully, false if connection broken
+     */
     bool send(const Packet& packet);
+
+    /*
+     * Low-level send method. Handles partial writes and EAGAIN.
+     */
     bool send_raw(const uint8_t* data, size_t len);
     
     void set_packet_callback(PacketCallback cb) { packet_callback_ = std::move(cb); }
     void set_disconnect_callback(DisconnectCallback cb) { disconnect_callback_ = std::move(cb); }
     
+    /*
+     * Reads available data from the socket into the receive buffer
+     * and attempts to parse full packets.
+     * Called by ConnectionManager when the socket is readable (EPOLLIN).
+     */
     void process_incoming();
     
     int socket_fd() const { return socket_fd_; }
@@ -69,6 +93,15 @@ private:
     bool try_parse_packet();
 };
 
+/*
+ * ConnectionManager
+ * 
+ * Manages the lifecycle of all TCP connections in the mesh.
+ * - Uses epoll for high-performance non-blocking I/O redundancy
+ * - Accepts incoming connections
+ * - Initiates outgoing connections
+ * - Routes packets to specific peers
+ */
 class ConnectionManager {
 public:
     explicit ConnectionManager(uint16_t listen_port);
