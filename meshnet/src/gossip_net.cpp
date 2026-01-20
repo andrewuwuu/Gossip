@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <cstring>
+#include <iostream>
 
 static std::unique_ptr<gossip::MeshNode> g_node;
 
@@ -96,6 +97,11 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
     }
     
     const auto& e = pending_events.front();
+    
+    // DEBUG: Log every event being returned to Go
+    std::cout << "[DEBUG] Event to Go: type=" << static_cast<int>(e.type) 
+              << " peer_id=" << e.peer_id 
+              << " username=" << e.username << std::endl;
     
     // ALWAYS zero the struct first to prevent memory bleed from previous events
     std::memset(event, 0, sizeof(GossipEvent));
