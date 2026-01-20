@@ -8,6 +8,7 @@
 #include <cstring>
 #include <chrono>
 #include <algorithm>
+#include <iostream>
 
 namespace gossip {
 
@@ -119,6 +120,8 @@ bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
                             const std::string& message, bool require_ack) {
     if (!running_) return false;
     
+    std::cout << "[DEBUG] Sending message to node " << dest_id << std::endl;
+
     Packet packet(PacketType::MESSAGE, node_id_);
     
     if (require_ack) {
@@ -135,11 +138,15 @@ bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
         return false;
     }
     
-    return conn_manager_->send_to(dest_id, packet);
+    bool result = conn_manager_->send_to(dest_id, packet);
+    std::cout << "[DEBUG] Send result: " << (result ? "Success" : "Failed") << std::endl;
+    return result;
 }
 
 bool MeshNode::broadcast_message(const std::string& username, const std::string& message) {
     if (!running_) return false;
+
+    std::cout << "[DEBUG] Broadcasting message" << std::endl;
     
     Packet packet(PacketType::MESSAGE, node_id_, FLAG_BROADCAST);
     
@@ -159,9 +166,11 @@ bool MeshNode::broadcast_message(const std::string& username, const std::string&
 
 bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     if (!running_) return false;
+    std::cout << "[DEBUG] Connecting to peer " << addr << ":" << port << std::endl;
     
     auto conn = conn_manager_->connect_to(addr, port);
     if (!conn) {
+        std::cout << "[DEBUG] Connection failed" << std::endl;
         return false;
     }
     
@@ -197,6 +206,7 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
 
 void MeshNode::discover_peers() {
     if (!running_ || discovery_socket_ < 0) return;
+    std::cout << "[DEBUG] Broadcasting discovery packet" << std::endl;
     
     Packet discover(PacketType::DISCOVER, node_id_);
     
@@ -248,6 +258,7 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
     }
     
     uint16_t from_id = packet.source_id();
+    // std::cout << "[DEBUG] Got packet Type=" << (int)packet.type() << " from " << from_id << std::endl;
     
     switch (packet.type()) {
         case PacketType::PING: {
@@ -266,6 +277,7 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
         }
         
         case PacketType::ANNOUNCE: {
+            std::cout << "[DEBUG] Received ANNOUNCE from " << from_id << std::endl;
             if (packet.payload().size() >= 2) {
                 uint16_t peer_port = ntohs(
                     *reinterpret_cast<const uint16_t*>(packet.payload().data())
@@ -301,6 +313,7 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
         }
         
         case PacketType::MESSAGE: {
+            std::cout << "[DEBUG] Received MESSAGE from " << from_id << std::endl;
             MessagePayload msg;
             if (MessagePayload::deserialize(
                     packet.payload().data(), packet.payload().size(), msg)) {
@@ -380,6 +393,7 @@ void MeshNode::handle_discovery() {
         inet_ntop(AF_INET, &sender_addr.sin_addr, addr_str, sizeof(addr_str));
         
         if (packet.type() == PacketType::DISCOVER) {
+            std::cout << "[DEBUG] Got DISCOVER from " << packet.source_id() << " at " << addr_str << std::endl;
             send_announce(addr_str, ntohs(sender_addr.sin_port));
             
             if (packet.payload().size() >= 2) {
@@ -389,6 +403,7 @@ void MeshNode::handle_discovery() {
                 connect_to_peer(addr_str, peer_port);
             }
         } else if (packet.type() == PacketType::ANNOUNCE) {
+            std::cout << "[DEBUG] Got UDP ANNOUNCE from " << packet.source_id() << " at " << addr_str << std::endl;
             if (packet.payload().size() >= 2) {
                 uint16_t peer_port = ntohs(
                     *reinterpret_cast<const uint16_t*>(packet.payload().data())

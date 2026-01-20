@@ -10,6 +10,7 @@
 #include <cerrno>
 #include <cstring>
 #include <algorithm>
+#include <iostream>
 
 namespace gossip {
 
@@ -372,13 +373,14 @@ void ConnectionManager::accept_connections() {
             continue;
         }
         
+        char addr_str[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, addr_str, sizeof(addr_str));
+        std::cout << "[DEBUG] Accepted connection from " << addr_str << ":" << ntohs(client_addr.sin_port) << std::endl;
+
         set_nonblocking(client_fd);
         
         int opt = 1;
         setsockopt(client_fd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
-        
-        char addr_str[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &client_addr.sin_addr, addr_str, sizeof(addr_str));
         
         auto conn = std::make_shared<Connection>(
             client_fd, addr_str, ntohs(client_addr.sin_port)
