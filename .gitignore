@@ -30,3 +30,6 @@ go.work
 
 # Debug
 __debug_bin*
+
+# Logs
+*.logs

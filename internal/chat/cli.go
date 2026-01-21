@@ -20,19 +20,26 @@ type CLI struct {
 	reader   *bufio.Reader
 	running  bool
 	stopChan chan struct{}
+	ui       *TUI
 }
 
 func NewCLI(cfg *config.Config) *CLI {
-	return &CLI{
+	cli := &CLI{
 		config:   cfg,
 		peers:    meshnet.NewPeerManager(),
 		reader:   bufio.NewReader(os.Stdin),
 		stopChan: make(chan struct{}),
 	}
+	cli.ui = NewTUI(cli)
+	cli.ui.AppendLine(fmt.Sprintf("Node ID: %d | Listening on port %d | Discovery port %d", cfg.NodeID, cfg.NodePort, cfg.DiscoveryPort))
+	cli.ui.AppendLine("Type /help for available commands")
+	return cli
 }
 
 func (c *CLI) Run() error {
-	c.printBanner()
+	if c.ui == nil {
+		c.printBanner()
+	}
 
 	mesh, err := meshnet.New(c.config.NodeID)
 	if err != nil {
@@ -60,13 +67,18 @@ func (c *CLI) Run() error {
 		return fmt.Errorf("failed to start mesh: %w", err)
 	}
 
-	c.printf("Node ID: %d | Listening on port %d | Discovery port %d\n",
-		c.config.NodeID, c.config.NodePort, c.config.DiscoveryPort)
-	c.printf("Type /help for available commands\n\n")
+	if c.ui == nil {
+		c.printf("Node ID: %d | Listening on port %d | Discovery port %d\n",
+			c.config.NodeID, c.config.NodePort, c.config.DiscoveryPort)
+		c.printf("Type /help for available commands\n\n")
+	}
 
 	c.mesh.Discover()
 
 	c.running = true
+	if c.ui != nil {
+		return c.ui.Run()
+	}
 	return c.inputLoop()
 }
 
@@ -187,15 +199,15 @@ func (c *CLI) handleEvent(event meshnet.Event) {
 	switch event.Type {
 	case meshnet.EventPeerConnected:
 		peer := c.peers.AddPeer(event.PeerID, "", 0)
-		c.printf("\n[+] Peer connected: %s\n", peer)
+		c.printf("[+] Peer connected: %s", peer)
 		c.printPrompt()
 
 	case meshnet.EventPeerDisconnected:
 		peer := c.peers.GetPeer(event.PeerID)
 		if peer != nil {
-			c.printf("\n[-] Peer disconnected: %s\n", peer)
+			c.printf("[-] Peer disconnected: %s", peer)
 		} else {
-			c.printf("\n[-] Peer disconnected: %d\n", event.PeerID)
+			c.printf("[-] Peer disconnected: %d", event.PeerID)
 		}
 		c.peers.RemovePeer(event.PeerID)
 		c.printPrompt()
@@ -204,14 +216,14 @@ func (c *CLI) handleEvent(event meshnet.Event) {
 		c.handler.HandleIncoming(event.PeerID, event.Username, event.Data)
 
 	case meshnet.EventError:
-		c.printf("\n[!] Error: code %d\n", event.ErrorCode)
+		c.printf("[!] Error: code %d", event.ErrorCode)
 		c.printPrompt()
 	}
 }
 
 func (c *CLI) sendBroadcast(message string) {
 	if len(message) > 512 {
-		c.printf("Message too long (max 512 characters).\n")
+		c.printf("Message too long (max 512 characters).")
 		return
 	}
 	if err := c.mesh.Broadcast(c.config.Username, message); err != nil {
@@ -225,7 +237,7 @@ func (c *CLI) sendBroadcast(message string) {
 
 func (c *CLI) sendDirectMessage(peerID uint16, message string) {
 	if len(message) > 512 {
-		c.printf("Message too long (max 512 characters).\n")
+		c.printf("Message too long (max 512 characters).")
 		return
 	}
 	if err := c.mesh.SendMessage(peerID, c.config.Username, message, false); err != nil {
@@ -239,6 +251,15 @@ func (c *CLI) sendDirectMessage(peerID uint16, message string) {
 }
 
 func (c *CLI) displayMessage(msg Message) {
+	if c.ui != nil {
+		if msg.Broadcast {
+			c.ui.AppendLine(fmt.Sprintf("<%s> %s", msg.Username, msg.Content))
+		} else {
+			c.ui.AppendLine(fmt.Sprintf("[DM from %s] %s", msg.Username, msg.Content))
+		}
+		return
+	}
+
 	timestamp := msg.Timestamp.Format("15:04:05")
 
 	if msg.Broadcast {
@@ -251,6 +272,11 @@ func (c *CLI) displayMessage(msg Message) {
 }
 
 func (c *CLI) displayOwnMessage(msg Message) {
+	if c.ui != nil {
+		c.ui.AppendLine(fmt.Sprintf("<%s> %s", c.config.Username, msg.Content))
+		return
+	}
+
 	timestamp := msg.Timestamp.Format("15:04:05")
 	fmt.Printf("[%s] <%s> %s\n", timestamp, c.config.Username, msg.Content)
 }
@@ -262,13 +288,13 @@ func (c *CLI) listPeers() {
 	peers := c.peers.GetConnectedPeers()
 
 	if len(peers) == 0 {
-		c.printf("No peers connected.\n")
+		c.printf("No peers connected.")
 		return
 	}
 
-	c.printf("Connected peers (%d):\n", len(peers))
+	c.printf("Connected peers (%d):", len(peers))
 	for _, peer := range peers {
-		c.printf("  [%d] %s\n", peer.ID, peer)
+		c.printf("  [%d] %s", peer.ID, peer)
 	}
 }
 
@@ -276,51 +302,51 @@ func (c *CLI) showHistory(limit int) {
 	messages := c.handler.GetHistory(limit)
 
 	if len(messages) == 0 {
-		c.printf("No message history.\n")
+		c.printf("No message history.")
 		return
 	}
 
-	c.printf("Last %d messages:\n", len(messages))
+	c.printf("Last %d messages:", len(messages))
 	for _, msg := range messages {
 		timestamp := msg.Timestamp.Format("15:04:05")
 		if msg.From == c.config.NodeID {
-			c.printf("[%s] <%s> %s\n", timestamp, msg.Username, msg.Content)
+			c.printf("[%s] <%s> %s", timestamp, msg.Username, msg.Content)
 		} else {
-			c.printf("[%s] <%s> %s\n", timestamp, msg.Username, msg.Content)
+			c.printf("[%s] <%s> %s", timestamp, msg.Username, msg.Content)
 		}
 	}
 }
 
 func (c *CLI) showInfo() {
-	c.printf("=== Node Info ===\n")
-	c.printf("App Name:       %s\n", c.config.AppName)
-	c.printf("Node ID:        %d\n", c.config.NodeID)
-	c.printf("Username:       %s\n", c.config.Username)
-	c.printf("Listen Port:    %d\n", c.config.NodePort)
-	c.printf("Discovery Port: %d\n", c.config.DiscoveryPort)
-	c.printf("Store History:  %v\n", c.config.StoreHistory)
-	c.printf("Connected Peers: %d\n", c.peers.Count())
+	c.printf("=== Node Info ===")
+	c.printf("App Name:       %s", c.config.AppName)
+	c.printf("Node ID:        %d", c.config.NodeID)
+	c.printf("Username:       %s", c.config.Username)
+	c.printf("Listen Port:    %d", c.config.NodePort)
+	c.printf("Discovery Port: %d", c.config.DiscoveryPort)
+	c.printf("Store History:  %v", c.config.StoreHistory)
+	c.printf("Connected Peers: %d", c.peers.Count())
 }
 
 func (c *CLI) printHelp() {
-	c.printf(`
-Available commands:
-  /help, /h          Show this help message
-  /peers, /p         List connected peers
-  /discover, /d      Send peer discovery broadcast
-  /connect, /c       Connect to a peer: /connect <address> <port>
-  /msg, /m           Send direct message: /msg <peer_id> <message>
-  /nick, /n          Change username: /nick <username>
-  /history [n]       Show last n messages (default: 20)
-  /info, /i          Show node information
-  /clear             Clear the screen
-  /quit, /q, /exit   Exit the application
-
-To send a broadcast message, just type your message and press Enter.
-`)
+	c.printf("Available commands:")
+	c.printf("  /help, /h          Show this help message")
+	c.printf("  /peers, /p         List connected peers")
+	c.printf("  /discover, /d      Send peer discovery broadcast")
+	c.printf("  /connect, /c       Connect to a peer: /connect <address> <port>")
+	c.printf("  /msg, /m           Send direct message: /msg <peer_id> <message>")
+	c.printf("  /nick, /n          Change username: /nick <username>")
+	c.printf("  /history [n]       Show last n messages (default: 20)")
+	c.printf("  /info, /i          Show node information")
+	c.printf("  /clear             Clear the screen")
+	c.printf("  /quit, /q, /exit   Exit the application")
+	c.printf("To send a broadcast message, just type your message and press Enter.")
 }
 
 func (c *CLI) printBanner() {
+	if c.ui != nil {
+		return
+	}
 	fmt.Print(`
  ██████╗  ██████╗ ███████╗███████╗██╗██████╗ 
 ██╔════╝ ██╔═══██╗██╔════╝██╔════╝██║██╔══██╗
@@ -333,14 +359,25 @@ func (c *CLI) printBanner() {
 }
 
 func (c *CLI) printPrompt() {
+	if c.ui != nil {
+		return
+	}
 	fmt.Printf("[%s] > ", c.config.Username)
 }
 
 func (c *CLI) printf(format string, args ...any) {
+	if c.ui != nil {
+		line := strings.TrimRight(fmt.Sprintf(format, args...), "\n")
+		c.ui.AppendLine(line)
+		return
+	}
 	fmt.Printf(format, args...)
 }
 
 func (c *CLI) clearScreen() {
+	if c.ui != nil {
+		return
+	}
 	fmt.Print("\033[H\033[2J")
 }
 

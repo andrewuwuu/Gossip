@@ -1,4 +1,5 @@
 #include "connection.h"
+#include "logging.h"
 
 #include <sys/socket.h>
 #include <sys/epoll.h>
@@ -11,6 +12,7 @@
 #include <cstring>
 #include <algorithm>
 #include <iostream>
+#include <sstream>
 
 namespace gossip {
 
@@ -114,7 +116,7 @@ void Connection::process_incoming() {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             }
-            std::cout << "[DEBUG] Recv error: " << strerror(errno) << std::endl;
+            gossip::logging::error(std::string("Recv error: ") + strerror(errno));
             state_ = State::ERROR;
             if (disconnect_callback_) {
                 disconnect_callback_();
@@ -123,7 +125,7 @@ void Connection::process_incoming() {
         }
         
         if (n == 0) {
-            std::cout << "[DEBUG] Connection closed by peer" << std::endl;
+            gossip::logging::info("Connection closed by peer");
             state_ = State::DISCONNECTED;
             if (disconnect_callback_) {
                 disconnect_callback_();
@@ -131,7 +133,7 @@ void Connection::process_incoming() {
             return;
         }
         
-        std::cout << "[DEBUG] Received " << n << " bytes" << std::endl;
+        gossip::logging::debug("Received bytes: " + std::to_string(n));
         recv_buffer_.insert(recv_buffer_.end(), buffer, buffer + n);
         
         while (try_parse_packet()) {
@@ -149,7 +151,9 @@ bool Connection::try_parse_packet() {
     
     // Check Magic Byte first (no endian swap needed for byte)
     if (header.magic != MAGIC_BYTE) {
-        std::cout << "[ERROR] Invalid magic byte: " << std::hex << (int)header.magic << std::dec << std::endl;
+        std::ostringstream err;
+        err << "Invalid magic byte: 0x" << std::hex << static_cast<int>(header.magic);
+        gossip::logging::error(err.str());
         // Optimization: Drop 1 byte and retry to resync? Or drop connection?
         // For now, just drop connection as protocol violation
         recv_buffer_.clear(); 
@@ -214,7 +218,7 @@ ConnectionManager::~ConnectionManager() {
 bool ConnectionManager::start() {
     listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd_ < 0) {
-        std::cerr << "[ERROR] Failed to create listen socket: " << strerror(errno) << std::endl;
+        gossip::logging::error(std::string("Failed to create listen socket: ") + strerror(errno));
         return false;
     }
     
@@ -222,7 +226,7 @@ bool ConnectionManager::start() {
     setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     
     if (!set_nonblocking(listen_fd_)) {
-        std::cerr << "[ERROR] Failed to set listen socket non-blocking: " << strerror(errno) << std::endl;
+        gossip::logging::error(std::string("Failed to set listen socket non-blocking: ") + strerror(errno));
         ::close(listen_fd_);
         listen_fd_ = -1;
         return false;
@@ -234,14 +238,15 @@ bool ConnectionManager::start() {
     addr.sin_port = htons(listen_port_);
     
     if (bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        std::cerr << "[ERROR] Failed to bind listen socket to port " << listen_port_ << ": " << strerror(errno) << std::endl;
+        gossip::logging::error(
+            "Failed to bind listen socket to port " + std::to_string(listen_port_) + ": " + strerror(errno));
         ::close(listen_fd_);
         listen_fd_ = -1;
         return false;
     }
     
     if (listen(listen_fd_, 128) < 0) {
-        std::cerr << "[ERROR] Failed to listen on socket: " << strerror(errno) << std::endl;
+        gossip::logging::error(std::string("Failed to listen on socket: ") + strerror(errno));
         ::close(listen_fd_);
         listen_fd_ = -1;
         return false;
@@ -249,7 +254,7 @@ bool ConnectionManager::start() {
     
     epoll_fd_ = epoll_create1(0);
     if (epoll_fd_ < 0) {
-        std::cerr << "[ERROR] Failed to create epoll instance: " << strerror(errno) << std::endl;
+        gossip::logging::error(std::string("Failed to create epoll instance: ") + strerror(errno));
         ::close(listen_fd_);
         listen_fd_ = -1;
         return false;
@@ -259,7 +264,7 @@ bool ConnectionManager::start() {
     ev.events = EPOLLIN;
     ev.data.fd = listen_fd_;
     if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, listen_fd_, &ev) < 0) {
-        std::cerr << "[ERROR] Failed to add listen socket to epoll: " << strerror(errno) << std::endl;
+        gossip::logging::error(std::string("Failed to add listen socket to epoll: ") + strerror(errno));
         ::close(listen_fd_);
         ::close(epoll_fd_);
         listen_fd_ = -1;
@@ -268,7 +273,7 @@ bool ConnectionManager::start() {
     }
     
     running_ = true;
-    std::cout << "[DEBUG] ConnectionManager started on port " << listen_port_ << std::endl;
+    gossip::logging::info("ConnectionManager started on port " + std::to_string(listen_port_));
     return true;
 }
 
@@ -362,7 +367,7 @@ void ConnectionManager::register_connection(uint16_t node_id, std::shared_ptr<Co
     
     // Check if we already have a connection for this node
     if (connections_.count(node_id) > 0) {
-        std::cout << "[DEBUG] Already connected to node " << node_id << ". Closing duplicate." << std::endl;
+        gossip::logging::warn("Already connected to node " + std::to_string(node_id) + ". Closing duplicate.");
         conn->close();
         return;
     }
@@ -469,7 +474,9 @@ void ConnectionManager::accept_connections() {
         
         char addr_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, addr_str, sizeof(addr_str));
-        std::cout << "[DEBUG] Accepted connection from " << addr_str << ":" << ntohs(client_addr.sin_port) << std::endl;
+        gossip::logging::info(
+            std::string("Accepted connection from ") + addr_str + ":" +
+            std::to_string(ntohs(client_addr.sin_port)));
 
         set_nonblocking(client_fd);
         

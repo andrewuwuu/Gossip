@@ -1,4 +1,5 @@
 #include "mesh_node.h"
+#include "logging.h"
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -76,13 +77,13 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     });
 
     if (!conn_manager_->start()) {
-        std::cerr << "[ERROR] ConnectionManager failed to start" << std::endl;
+        gossip::logging::error("ConnectionManager failed to start");
         return false;
     }
     
     discovery_socket_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (discovery_socket_ < 0) {
-        std::cerr << "[ERROR] Failed to create discovery socket: " << strerror(errno) << std::endl;
+        gossip::logging::error(std::string("Failed to create discovery socket: ") + strerror(errno));
         conn_manager_->stop();
         return false;
     }
@@ -100,7 +101,8 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     bind_addr.sin_port = htons(discovery_port);
     
     if (bind(discovery_socket_, reinterpret_cast<sockaddr*>(&bind_addr), sizeof(bind_addr)) < 0) {
-        std::cerr << "[ERROR] Failed to bind discovery socket to port " << discovery_port << ": " << strerror(errno) << std::endl;
+        gossip::logging::error(
+            "Failed to bind discovery socket to port " + std::to_string(discovery_port) + ": " + strerror(errno));
         ::close(discovery_socket_);
         discovery_socket_ = -1;
         conn_manager_->stop();
@@ -108,7 +110,7 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     }
     
     running_ = true;
-    std::cout << "[DEBUG] MeshNode started. Discovery on port " << discovery_port << std::endl;
+    gossip::logging::info("MeshNode started. Discovery on port " + std::to_string(discovery_port));
     return true;
 }
 
@@ -140,11 +142,11 @@ bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
                             const std::string& message, bool require_ack) {
     if (!running_) return false;
     if (message.size() > MAX_MESSAGE_LENGTH) {
-        std::cout << "[DEBUG] Message too long" << std::endl;
+        gossip::logging::warn("Message too long");
         return false;
     }
     
-    std::cout << "[DEBUG] Sending message to node " << dest_id << std::endl;
+    gossip::logging::debug("Sending message to node " + std::to_string(dest_id));
 
     Packet packet(PacketType::MESSAGE, node_id_);
     
@@ -163,18 +165,18 @@ bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
     }
     
     bool result = conn_manager_->send_to(dest_id, packet);
-    std::cout << "[DEBUG] Send result: " << (result ? "Success" : "Failed") << std::endl;
+    gossip::logging::debug(std::string("Send result: ") + (result ? "success" : "failed"));
     return result;
 }
 
 bool MeshNode::broadcast_message(const std::string& username, const std::string& message) {
     if (!running_) return false;
     if (message.size() > MAX_MESSAGE_LENGTH) {
-        std::cout << "[DEBUG] Message too long" << std::endl;
+        gossip::logging::warn("Message too long");
         return false;
     }
 
-    std::cout << "[DEBUG] Broadcasting message" << std::endl;
+    gossip::logging::debug("Broadcasting message");
     
     Packet packet(PacketType::MESSAGE, node_id_, FLAG_BROADCAST);
     
@@ -202,11 +204,11 @@ bool MeshNode::broadcast_message(const std::string& username, const std::string&
  */
 bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     if (!running_) return false;
-    std::cout << "[DEBUG] Connecting to peer " << addr << ":" << port << std::endl;
+    gossip::logging::info("Connecting to peer " + addr + ":" + std::to_string(port));
     
     auto conn = conn_manager_->connect_to(addr, port);
     if (!conn) {
-        std::cout << "[DEBUG] Connection failed" << std::endl;
+        gossip::logging::warn("Connection failed");
         return false;
     }
     
@@ -248,7 +250,7 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
  */
 void MeshNode::discover_peers() {
     if (!running_ || discovery_socket_ < 0) return;
-    std::cout << "[DEBUG] Broadcasting discovery packet" << std::endl;
+    gossip::logging::debug("Broadcasting discovery packet");
     
     Packet discover(PacketType::DISCOVER, node_id_);
     
@@ -315,7 +317,7 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
     }
     
     uint16_t from_id = packet.source_id();
-    // std::cout << "[DEBUG] Got packet Type=" << (int)packet.type() << " from " << from_id << std::endl;
+    // gossip::logging::debug("Got packet type from " + std::to_string(from_id));
     
     switch (packet.type()) {
         case PacketType::PING: {
@@ -334,7 +336,7 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
         }
         
         case PacketType::ANNOUNCE: {
-            std::cout << "[DEBUG] Received ANNOUNCE from " << from_id << std::endl;
+            gossip::logging::debug("Received ANNOUNCE from " + std::to_string(from_id));
             if (packet.payload().size() >= 2) {
                 // Manual Big Endian deserialization
                 const uint8_t* data = packet.payload().data();
@@ -371,7 +373,7 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
         }
         
         case PacketType::MESSAGE: {
-            std::cout << "[DEBUG] Received MESSAGE from " << from_id << std::endl;
+            gossip::logging::debug("Received MESSAGE from " + std::to_string(from_id));
             MessagePayload msg;
             if (MessagePayload::deserialize(
                     packet.payload().data(), packet.payload().size(), msg)) {
@@ -451,7 +453,8 @@ void MeshNode::handle_discovery() {
         inet_ntop(AF_INET, &sender_addr.sin_addr, addr_str, sizeof(addr_str));
         
         if (packet.type() == PacketType::DISCOVER) {
-            std::cout << "[DEBUG] Got DISCOVER from " << packet.source_id() << " at " << addr_str << std::endl;
+            gossip::logging::debug(
+                "Got DISCOVER from " + std::to_string(packet.source_id()) + " at " + addr_str);
             send_announce(addr_str, ntohs(sender_addr.sin_port));
             
             if (packet.payload().size() >= 2) {
@@ -465,7 +468,8 @@ void MeshNode::handle_discovery() {
                 }
             }
         } else if (packet.type() == PacketType::ANNOUNCE) {
-            std::cout << "[DEBUG] Got UDP ANNOUNCE from " << packet.source_id() << " at " << addr_str << std::endl;
+            gossip::logging::debug(
+                "Got UDP ANNOUNCE from " + std::to_string(packet.source_id()) + " at " + addr_str);
             if (packet.payload().size() >= 2) {
                 const uint8_t* data = packet.payload().data();
                 uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);

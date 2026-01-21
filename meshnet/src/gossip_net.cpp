@@ -1,5 +1,6 @@
 #include "gossip_net.h"
 #include "mesh_node.h"
+#include "logging.h"
 
 #include <memory>
 #include <cstring>
@@ -117,10 +118,10 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
     
     const auto& e = pending_events.front();
     
-    // DEBUG: Log every event being returned to Go
-    std::cout << "[DEBUG] Event to Go: type=" << static_cast<int>(e.type) 
-              << " peer_id=" << e.peer_id 
-              << " username=" << e.username << std::endl;
+    gossip::logging::debug(
+        "Event to Go type=" + std::to_string(static_cast<int>(e.type)) +
+        " peer_id=" + std::to_string(e.peer_id) +
+        " username=" + e.username);
     
     // ALWAYS zero the struct first to prevent memory bleed from previous events
     std::memset(event, 0, sizeof(GossipEvent));

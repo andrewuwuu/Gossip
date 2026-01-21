@@ -9,6 +9,7 @@ set(SOURCES
     src/connection.cpp
     src/mesh_node.cpp
     src/gossip_net.cpp
+    src/logging.cpp
 )
 
 set(HEADERS
@@ -16,6 +17,7 @@ set(HEADERS
     include/connection.h
     include/mesh_node.h
     include/gossip_net.h
+    include/logging.h
 )
 
 add_library(gossipnet SHARED ${SOURCES} ${HEADERS})
