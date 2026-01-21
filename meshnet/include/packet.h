@@ -5,6 +5,7 @@
 #include <cstring>
 #include <vector>
 #include <array>
+#include <string>
 #include <arpa/inet.h>
 
 namespace gossip {
@@ -13,6 +14,7 @@ constexpr uint8_t MAGIC_BYTE = 0x47;  // 'G' for Gossip
 constexpr uint8_t PROTOCOL_VERSION = 0x01;
 constexpr size_t HEADER_SIZE = 12;
 constexpr size_t MAX_PAYLOAD_SIZE = 16384;  // 16KB max
+constexpr size_t MAX_MESSAGE_LENGTH = 512;  // IRC-style message limit
 
 enum class PacketType : uint8_t {
     PING        = 0x01,
@@ -195,6 +197,9 @@ struct MessagePayload {
     std::string message;
     
     std::vector<uint8_t> serialize() const {
+        if (message.size() > MAX_MESSAGE_LENGTH) {
+            return {};
+        }
         std::vector<uint8_t> buffer;
         buffer.reserve(2 + 1 + username.size() + message.size());
         
@@ -221,6 +226,10 @@ struct MessagePayload {
             reinterpret_cast<const char*>(data + 3 + username_len),
             len - 3 - username_len
         );
+
+        if (out.message.size() > MAX_MESSAGE_LENGTH) {
+            return false;
+        }
         
         return true;
     }

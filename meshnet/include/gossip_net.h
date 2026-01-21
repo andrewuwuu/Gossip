@@ -15,7 +15,7 @@ extern "C" {
 #define GOSSIP_EVENT_ERROR             4
 
 #define GOSSIP_MAX_USERNAME_LEN  64
-#define GOSSIP_MAX_MESSAGE_LEN   16384
+#define GOSSIP_MAX_MESSAGE_LEN   512
 
 /*
  * GossipEvent struct layout - NATURALLY ALIGNED for CGo compatibility
@@ -29,8 +29,8 @@ extern "C" {
  *   offset 16:  data_len   (uint64_t, 8 bytes)
  *   offset 24:  error_code (int64_t, 8 bytes)
  *   offset 32:  username   (char[64], 64 bytes)
- *   offset 96:  data       (uint8_t[16384], 16384 bytes)
- * Total: 16480 bytes, all fields naturally aligned.
+ *   offset 96:  data       (uint8_t[512], 512 bytes)
+ * Total: 608 bytes, all fields naturally aligned.
  */
 typedef struct GossipEvent {
     int64_t event_type;

@@ -22,6 +22,8 @@ var (
 	ErrInvalidParam   = errors.New("invalid parameter")
 )
 
+const maxMessageLen = 512
+
 type EventType int
 
 const (
@@ -168,6 +170,10 @@ func (m *MeshNet) SendMessage(destID uint16, username, message string, requireAc
 		return ErrInvalidParam
 	}
 
+	if len(message) > maxMessageLen {
+		return ErrInvalidParam
+	}
+
 	cUsername := C.CString(username)
 	defer C.free(unsafe.Pointer(cUsername))
 
@@ -200,6 +206,10 @@ func (m *MeshNet) Broadcast(username, message string) error {
 
 	if !m.running {
 		return ErrNotRunning
+	}
+
+	if len(message) > maxMessageLen {
+		return ErrInvalidParam
 	}
 
 	if username == "" || message == "" {

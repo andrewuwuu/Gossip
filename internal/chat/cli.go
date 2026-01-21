@@ -210,6 +210,10 @@ func (c *CLI) handleEvent(event meshnet.Event) {
 }
 
 func (c *CLI) sendBroadcast(message string) {
+	if len(message) > 512 {
+		c.printf("Message too long (max 512 characters).\n")
+		return
+	}
 	if err := c.mesh.Broadcast(c.config.Username, message); err != nil {
 		c.printf("Failed to send: %v\n", err)
 		return
@@ -220,6 +224,10 @@ func (c *CLI) sendBroadcast(message string) {
 }
 
 func (c *CLI) sendDirectMessage(peerID uint16, message string) {
+	if len(message) > 512 {
+		c.printf("Message too long (max 512 characters).\n")
+		return
+	}
 	if err := c.mesh.SendMessage(peerID, c.config.Username, message, false); err != nil {
 		c.printf("Failed to send: %v\n", err)
 		return

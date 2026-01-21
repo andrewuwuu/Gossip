@@ -139,6 +139,10 @@ void MeshNode::stop() {
 bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
                             const std::string& message, bool require_ack) {
     if (!running_) return false;
+    if (message.size() > MAX_MESSAGE_LENGTH) {
+        std::cout << "[DEBUG] Message too long" << std::endl;
+        return false;
+    }
     
     std::cout << "[DEBUG] Sending message to node " << dest_id << std::endl;
 
@@ -165,6 +169,10 @@ bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
 
 bool MeshNode::broadcast_message(const std::string& username, const std::string& message) {
     if (!running_) return false;
+    if (message.size() > MAX_MESSAGE_LENGTH) {
+        std::cout << "[DEBUG] Message too long" << std::endl;
+        return false;
+    }
 
     std::cout << "[DEBUG] Broadcasting message" << std::endl;
     
