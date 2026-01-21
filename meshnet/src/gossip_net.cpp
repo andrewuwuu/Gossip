@@ -5,8 +5,13 @@
 #include <memory>
 #include <cstring>
 #include <iostream>
+#include <mutex>
+#include <queue>
 
 static std::unique_ptr<gossip::MeshNode> g_node;
+static std::mutex g_event_queue_mutex;
+static std::queue<gossip::MeshEvent> g_pending_events;
+static bool g_callback_set = false;
 
 extern "C" {
 
@@ -49,6 +54,11 @@ void gossip_destroy(void) {
     if (g_node) {
         g_node->stop();
         g_node.reset();
+    }
+    g_callback_set = false;
+    std::lock_guard<std::mutex> lock(g_event_queue_mutex);
+    while (!g_pending_events.empty()) {
+        g_pending_events.pop();
     }
 }
 
@@ -102,21 +112,24 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
         return -1;
     }
     
-    static std::queue<gossip::MeshEvent> pending_events;
-    
-    // Set up the callback to capture events from the MeshNode
-    g_node->set_event_callback([&](const gossip::MeshEvent& e) {
-        pending_events.push(e);
-    });
+    // Set up the callback only once to avoid resetting it on every poll
+    if (!g_callback_set) {
+        g_node->set_event_callback([](const gossip::MeshEvent& e) {
+            std::lock_guard<std::mutex> lock(g_event_queue_mutex);
+            g_pending_events.push(e);
+        });
+        g_callback_set = true;
+    }
     
     g_node->poll_events(timeout_ms);
     
-    if (pending_events.empty()) {
+    std::lock_guard<std::mutex> lock(g_event_queue_mutex);
+    if (g_pending_events.empty()) {
         std::memset(event, 0, sizeof(GossipEvent));
         return 0; // No events
     }
     
-    const auto& e = pending_events.front();
+    const auto& e = g_pending_events.front();
     
     gossip::logging::debug(
         "Event to Go type=" + std::to_string(static_cast<int>(e.type)) +
@@ -138,7 +151,7 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
         std::memcpy(event->data, e.data.data(), event->data_len);
     }
     
-    pending_events.pop();
+    g_pending_events.pop();
     return 1; // 1 event returned
 }
 

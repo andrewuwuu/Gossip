@@ -131,14 +131,19 @@ func (t *TUI) AppendLine(line string) {
 }
 
 func (t *TUI) handleInput(text string) {
-	if strings.HasPrefix(text, "/") {
-		if t.cli != nil {
-			t.cli.handleCommand(text)
+	// Run in goroutine to avoid deadlock - sending messages back to TUI
+	// from within the Update loop would block because program.Send waits
+	// for the Update to read, but Update is waiting for handleInput to return.
+	go func() {
+		if strings.HasPrefix(text, "/") {
+			if t.cli != nil {
+				t.cli.handleCommand(text)
+			}
+			return
 		}
-		return
-	}
 
-	if t.cli != nil {
-		t.cli.sendBroadcast(text)
-	}
+		if t.cli != nil {
+			t.cli.sendBroadcast(text)
+		}
+	}()
 }
