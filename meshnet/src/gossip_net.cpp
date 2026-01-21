@@ -112,7 +112,9 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
         return -1;
     }
     
-    // Set up the callback only once to avoid resetting it on every poll
+    /*
+     * Set up the callback only once to avoid resetting it on every poll
+     */
     if (!g_callback_set) {
         g_node->set_event_callback([](const gossip::MeshEvent& e) {
             std::lock_guard<std::mutex> lock(g_event_queue_mutex);
@@ -136,10 +138,14 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
         " peer_id=" + std::to_string(e.peer_id) +
         " username=" + e.username);
     
-    // ALWAYS zero the struct first to prevent memory bleed from previous events
+    /*
+     * ALWAYS zero the struct first to prevent memory bleed from previous events
+     */
     std::memset(event, 0, sizeof(GossipEvent));
     
-    // Use 64-bit casts to match the naturally aligned struct layout
+    /*
+     * Use 64-bit casts to match the naturally aligned struct layout
+     */
     event->event_type = static_cast<int64_t>(e.type);
     event->peer_id = static_cast<uint64_t>(e.peer_id);
     event->error_code = static_cast<int64_t>(e.error_code);

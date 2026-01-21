@@ -149,7 +149,9 @@ bool Connection::try_parse_packet() {
     PacketHeader header;
     std::memcpy(&header, recv_buffer_.data(), HEADER_SIZE);
     
-    // Check Magic Byte first (no endian swap needed for byte)
+    /*
+     * Check Magic Byte first (no endian swap needed for byte)
+     */
     if (header.magic != MAGIC_BYTE) {
         std::ostringstream err;
         err << "Invalid magic byte: 0x" << std::hex << static_cast<int>(header.magic);
@@ -160,17 +162,23 @@ bool Connection::try_parse_packet() {
         return false;
     }
 
-    // Convert to host order to check length
+    /*
+     * Convert to host order to check length
+     */
     PacketHeader host_header = header;
     host_header.to_host_order();
     
     size_t total_size = HEADER_SIZE + host_header.payload_length;
     if (recv_buffer_.size() < total_size) {
-        // Wait for more data
+        /*
+         * Wait for more data
+         */
         return false;
     }
     
-    // We have a full packet
+    /*
+     * We have a full packet
+     */
     std::vector<uint8_t> payload(
         recv_buffer_.begin() + HEADER_SIZE,
         recv_buffer_.begin() + total_size
@@ -178,7 +186,9 @@ bool Connection::try_parse_packet() {
     
     Packet packet(host_header, payload);
     
-    // Remove from buffer
+    /*
+     * Remove from buffer
+     */
     recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + total_size);
     
     if (packet_callback_) {
@@ -332,7 +342,9 @@ std::shared_ptr<Connection> ConnectionManager::connect_to(const std::string& add
     ev.data.fd = sock;
     epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, sock, &ev);
     
-    // Add to unregistered so it gets polled for incoming data
+    /*
+     * Add to unregistered so it gets polled for incoming data
+     */
     {
         std::lock_guard<std::mutex> lock(connections_mutex_);
         unregistered_connections_.push_back(conn);
@@ -365,7 +377,9 @@ void ConnectionManager::broadcast(const Packet& packet, uint16_t exclude_node_id
 void ConnectionManager::register_connection(uint16_t node_id, std::shared_ptr<Connection> conn) {
     std::lock_guard<std::mutex> lock(connections_mutex_);
     
-    // Check if we already have a connection for this node
+    /*
+     * Check if we already have a connection for this node
+     */
     if (connections_.count(node_id) > 0) {
         gossip::logging::warn("Already connected to node " + std::to_string(node_id) + ". Closing duplicate.");
         conn->close();
@@ -375,7 +389,9 @@ void ConnectionManager::register_connection(uint16_t node_id, std::shared_ptr<Co
     connections_[node_id] = conn;
     fd_to_node_[conn->socket_fd()] = node_id;
     
-    // Remove from unregistered list
+    /*
+     * Remove from unregistered list
+     */
     unregistered_connections_.erase(
         std::remove(unregistered_connections_.begin(), unregistered_connections_.end(), conn),
         unregistered_connections_.end()
@@ -426,7 +442,9 @@ void ConnectionManager::poll(int timeout_ms) {
                         conn_to_process = conn_it->second;
                     }
                 } else {
-                    // Check unregistered connections
+                    /*
+                     * Check unregistered connections
+                     */
                     for (auto& conn : unregistered_connections_) {
                         if (conn->socket_fd() == fd) {
                             conn_to_process = conn;
@@ -436,7 +454,9 @@ void ConnectionManager::poll(int timeout_ms) {
                 }
             }
             
-            // Release lock before processing to avoid deadlock
+            /*
+             * Release lock before processing to avoid deadlock
+             */
             if (conn_to_process) {
                 conn_to_process->process_incoming();
             }

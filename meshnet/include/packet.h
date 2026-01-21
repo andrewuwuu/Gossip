@@ -10,11 +10,11 @@
 
 namespace gossip {
 
-constexpr uint8_t MAGIC_BYTE = 0x47;  // 'G' for Gossip
+constexpr uint8_t MAGIC_BYTE = 0x47;        /* 'G' for Gossip */
 constexpr uint8_t PROTOCOL_VERSION = 0x01;
 constexpr size_t HEADER_SIZE = 12;
-constexpr size_t MAX_PAYLOAD_SIZE = 16384;  // 16KB max
-constexpr size_t MAX_MESSAGE_LENGTH = 512;  // IRC-style message limit
+constexpr size_t MAX_PAYLOAD_SIZE = 16384;  /* 16KB max */
+constexpr size_t MAX_MESSAGE_LENGTH = 512;  /* IRC-style message limit */
 
 enum class PacketType : uint8_t {
     PING        = 0x01,

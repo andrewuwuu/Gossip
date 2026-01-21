@@ -72,4 +72,8 @@ See [meshnet/README.md](./meshnet/README.md) for detailed networking technicals.
 If you see frequent disconnects, ensure both nodes are using the latest version as byte alignment and endianness are critical for connectivity.
 
 ### Building on Android (Termux)
-Use the provided `build_android.sh` script in the root directory. Refer to [ANDROID_GUIDE.md](./ANDROID_GUIDE.md) for detailed steps.
+Full instructions are available in [ANDROID_GUIDE.md](./ANDROID_GUIDE.md).
+Quick start:
+```bash
+./build_android.sh
+```

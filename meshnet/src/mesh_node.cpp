@@ -66,10 +66,14 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
             push_event(std::move(event));
         });
         
-        // Send our ANNOUNCE to the new connection
+        /*
+         * Send our ANNOUNCE to the new connection
+         */
         Packet announce(PacketType::ANNOUNCE, node_id_);
         std::vector<uint8_t> payload;
-        // Manual Big Endian serialization
+        /*
+         * Manual Big Endian serialization
+         */
         payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
         payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
         announce.set_payload(payload);
@@ -181,7 +185,7 @@ bool MeshNode::broadcast_message(const std::string& username, const std::string&
     Packet packet(PacketType::MESSAGE, node_id_, FLAG_BROADCAST);
     
     MessagePayload payload;
-    payload.dest_id = 0;  // Broadcast
+    payload.dest_id = 0;  /* Broadcast */
     payload.username = username;
     payload.message = message;
     
@@ -212,13 +216,17 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
         return false;
     }
     
-    // Store in pending until we get their ANNOUNCE
+    /*
+     * Store in pending until we get their ANNOUNCE
+     */
     {
         std::lock_guard<std::mutex> lock(pending_mutex_);
         pending_connections_[conn->socket_fd()] = conn;
     }
     
-    // Set up callbacks
+    /*
+     * Set up callbacks
+     */
     conn->set_packet_callback([this, conn](const Packet& packet) {
         handle_packet(conn, packet);
     });
@@ -230,7 +238,9 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
         push_event(std::move(event));
     });
     
-    // Send our ANNOUNCE
+    /*
+     * Send our ANNOUNCE
+     */
     Packet announce(PacketType::ANNOUNCE, node_id_);
     std::vector<uint8_t> payload;
     payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
@@ -338,15 +348,21 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
         case PacketType::ANNOUNCE: {
             gossip::logging::debug("Received ANNOUNCE from " + std::to_string(from_id));
             if (packet.payload().size() >= 2) {
-                // Manual Big Endian deserialization
+                /*
+                 * Manual Big Endian deserialization
+                 */
                 const uint8_t* data = packet.payload().data();
                 uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
                 
-                // Register this connection with the node ID
+                /*
+                 * Register this connection with the node ID
+                 */
                 conn->set_node_id(from_id);
                 conn_manager_->register_connection(from_id, conn);
                 
-                // Remove from pending if it was there
+                /*
+                 * Remove from pending if it was there
+                 */
                 {
                     std::lock_guard<std::mutex> lock(pending_mutex_);
                     pending_connections_.erase(conn->socket_fd());
@@ -461,8 +477,10 @@ void MeshNode::handle_discovery() {
                 const uint8_t* data = packet.payload().data();
                 uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
                 
-                // Tie-breaker: only connect if our node_id > their node_id
-                // This prevents BOTH nodes from connecting to each other simultaneously
+                /*
+                 * Tie-breaker: only connect if our node_id > their node_id
+                 * This prevents BOTH nodes from connecting to each other simultaneously
+                 */
                 if (node_id_ > packet.source_id()) {
                     connect_to_peer(addr_str, peer_port);
                 }
@@ -520,7 +538,9 @@ void MeshNode::forward_packet(const Packet& packet, uint16_t exclude_peer) {
     auto serialized = packet.serialize();
     forward.set_payload(serialized);
     
-    // Broadcast to all peers except the one we got it from
+    /*
+     * Broadcast to all peers except the one we got it from
+     */
     conn_manager_->broadcast(forward, exclude_peer);
 }
 
