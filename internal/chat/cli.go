@@ -187,8 +187,11 @@ func (c *CLI) handleCommand(line string) {
 		c.showInfo()
 
 	case "/quit", "/q", "/exit":
-		c.printf("Goodbye!\n")
+		c.printf("Goodbye!")
 		c.running = false
+		if c.ui != nil {
+			c.ui.Quit()
+		}
 
 	default:
 		c.printf("Unknown command: %s. Type /help for available commands.\n", cmd)

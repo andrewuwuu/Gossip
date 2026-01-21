@@ -25,6 +25,8 @@ type tuiLineMsg struct {
 	line string
 }
 
+type tuiQuitMsg struct{}
+
 func NewTUI(cli *CLI) *TUI {
 	input := textinput.New()
 	input.Placeholder = "Type message or /command"
@@ -60,6 +62,11 @@ func (t *TUI) Init() tea.Cmd {
 
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
+	case tuiQuitMsg:
+		if t.cli != nil {
+			t.cli.Stop()
+		}
+		return t, tea.Quit
 	case tuiLineMsg:
 		line := strings.TrimSpace(m.line)
 		if line != "" {
@@ -128,6 +135,13 @@ func (t *TUI) AppendLine(line string) {
 	}
 	t.content += line + "\n"
 	t.mu.Unlock()
+}
+
+// Quit sends a quit message to the TUI to exit cleanly
+func (t *TUI) Quit() {
+	if t.program != nil {
+		t.program.Send(tuiQuitMsg{})
+	}
 }
 
 func (t *TUI) handleInput(text string) {
