@@ -11,9 +11,10 @@ meshnet:
 
 gossip: meshnet
 	@echo "Building Go application..."
-	@CGO_ENABLED=1 LD_LIBRARY_PATH=./meshnet/build go build -o gossip .
+	CGO_ENABLED=1 LD_LIBRARY_PATH=./meshnet/build go build -v -o gossip .
 
 run: build
+	@echo "Starting application..."
 	@LD_LIBRARY_PATH=./meshnet/build ./gossip
 
 clean:

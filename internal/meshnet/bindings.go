@@ -385,3 +385,81 @@ func (m *MeshNet) eventLoop() {
 		}
 	}
 }
+
+/*
+ * Identity Management (PKI)
+ */
+
+const (
+	PublicKeySize  = 32
+	PrivateKeySize = 32
+)
+
+var (
+	ErrNoIdentity = errors.New("no identity loaded")
+)
+
+// LoadIdentity loads an identity from a file path.
+func (m *MeshNet) LoadIdentity(path string) error {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	if C.gossip_load_identity(cPath) != 0 {
+		return errors.New("failed to load identity from " + path)
+	}
+	return nil
+}
+
+// SaveIdentity saves the current identity to a file path.
+func (m *MeshNet) SaveIdentity(path string) error {
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
+
+	if C.gossip_save_identity(cPath) != 0 {
+		return errors.New("failed to save identity to " + path)
+	}
+	return nil
+}
+
+// GenerateIdentity generates a new keypair and stores it internally.
+// You should call SaveIdentity to persist it.
+func (m *MeshNet) GenerateIdentity() (publicKeyHex string, err error) {
+	var pubKey [PublicKeySize]byte
+	var privKey [PrivateKeySize]byte
+
+	C.gossip_generate_keypair((*C.uint8_t)(&pubKey[0]), (*C.uint8_t)(&privKey[0]))
+
+	// Store it in the C layer by saving to temp and loading?
+	// Actually the C API stores it globally when loaded.
+	// For now, we directly call set_private_key to use the generated key.
+	if C.gossip_set_private_key((*C.uint8_t)(&privKey[0])) != 0 {
+		return "", errors.New("failed to set generated identity")
+	}
+
+	// Get public key hex
+	var hexBuf [65]C.char
+	if C.gossip_get_public_key_hex(&hexBuf[0]) != 0 {
+		return "", errors.New("failed to get public key")
+	}
+
+	return C.GoString(&hexBuf[0]), nil
+}
+
+// HasIdentity returns true if an identity has been loaded or generated.
+func (m *MeshNet) HasIdentity() bool {
+	return C.gossip_has_identity() == 1
+}
+
+// GetPublicKeyHex returns the node's public key as a hex string.
+func (m *MeshNet) GetPublicKeyHex() (string, error) {
+	if C.gossip_has_identity() != 1 {
+		return "", ErrNoIdentity
+	}
+
+	var hexBuf [65]C.char
+	if C.gossip_get_public_key_hex(&hexBuf[0]) != 0 {
+		return "", errors.New("failed to get public key")
+	}
+
+	return C.GoString(&hexBuf[0]), nil
+}

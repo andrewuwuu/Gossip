@@ -64,14 +64,22 @@ func (c *CLI) Run() error {
 	})
 
 	/*
-	 * Configure encryption if session key is provided.
+	 * Configure encryption if session key is provided (PSK mode).
 	 */
 	if c.config.SessionKey != "" {
 		if err := c.mesh.SetSessionKeyHex(c.config.SessionKey); err != nil {
 			c.printf("Warning: Invalid session key, encryption disabled: %v\n", err)
 		} else {
-			c.printf("Encryption enabled (XChaCha20-Poly1305)\n")
+			c.printf("Encryption enabled (PSK mode)\n")
 		}
+	}
+
+	/*
+	 * PKI Identity Setup
+	 * Tries to load existing identity, prompts to generate if not found.
+	 */
+	if err := c.setupIdentity(); err != nil {
+		return fmt.Errorf("identity setup failed: %w", err)
 	}
 
 	if err := c.mesh.Start(c.config.NodePort, c.config.DiscoveryPort); err != nil {
@@ -214,6 +222,9 @@ func (c *CLI) handleEvent(event meshnet.Event) {
 	case meshnet.EventPeerConnected:
 		peer := c.peers.AddPeer(event.PeerID, "", 0)
 		c.printf("[+] Peer connected: %s", peer)
+		if c.ui != nil {
+			c.ui.UpdateStatus("Online", c.peers.Count())
+		}
 		c.printPrompt()
 
 	case meshnet.EventPeerDisconnected:
@@ -224,6 +235,9 @@ func (c *CLI) handleEvent(event meshnet.Event) {
 			c.printf("[-] Peer disconnected: %d", event.PeerID)
 		}
 		c.peers.RemovePeer(event.PeerID)
+		if c.ui != nil {
+			c.ui.UpdateStatus("Online", c.peers.Count())
+		}
 		c.printPrompt()
 
 	case meshnet.EventMessageReceived:
@@ -398,4 +412,60 @@ func (c *CLI) clearScreen() {
 
 func init() {
 	_ = time.Now
+}
+
+/*
+ * setupIdentity handles PKI identity loading/generation.
+ * If no identity file exists, prompts the user to generate one.
+ */
+func (c *CLI) setupIdentity() error {
+	// Try to load existing identity
+	err := c.mesh.LoadIdentity(c.config.IdentityPath)
+	if err == nil {
+		pubKey, _ := c.mesh.GetPublicKeyHex()
+		c.printf("Identity loaded. Public key: %s\n", pubKey[:16]+"...")
+		return nil
+	}
+
+	// No existing identity - prompt to generate
+	if os.Getenv("GOSSIP_AUTO_GENERATE") == "true" {
+		c.printf("Auto-generating identity based on env var...\n")
+	} else {
+		c.printf("No identity found at %s\n", c.config.IdentityPath)
+		c.printf("Generate a new keypair? [y/N]: ")
+
+		// Force flush to ensure user sees the prompt
+		os.Stdout.Sync()
+
+		var response string
+		_, err := fmt.Scanln(&response)
+		if err != nil && err.Error() != "unexpected newline" {
+			c.printf("\nCannot read input. Skipping generation.\n")
+			return nil
+		}
+
+		// Default to No. Only accept explicit yes.
+		response = strings.ToLower(strings.TrimSpace(response))
+		if response != "y" && response != "yes" {
+			c.printf("Skipping identity generation. PKI encryption disabled.\n")
+			return nil
+		}
+	}
+
+	// Generate new identity
+	pubKey, err := c.mesh.GenerateIdentity()
+	if err != nil {
+		return fmt.Errorf("failed to generate keypair: %w", err)
+	}
+
+	// Save to disk
+	if err := c.mesh.SaveIdentity(c.config.IdentityPath); err != nil {
+		c.printf("Warning: Failed to save identity: %v\n", err)
+		c.printf("Your public key (copy this): %s\n", pubKey)
+	} else {
+		c.printf("Identity created and saved!\n")
+		c.printf("Your public key: %s\n", pubKey)
+	}
+
+	return nil
 }

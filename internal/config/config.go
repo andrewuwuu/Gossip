@@ -20,7 +20,8 @@ type Config struct {
 	Debug         bool
 	StoreHistory  bool
 	HistoryPath   string
-	SessionKey    string /* Optional: 64-char hex key for encryption */
+	SessionKey    string /* Optional: 64-char hex key for encryption (PSK mode) */
+	IdentityPath  string /* Path to identity.key file for PKI mode */
 }
 
 func Load() (*Config, error) {
@@ -54,6 +55,18 @@ func Load() (*Config, error) {
 		homeDir, err := os.UserHomeDir()
 		if err == nil {
 			cfg.HistoryPath = filepath.Join(homeDir, ".gossip", "history")
+		}
+	}
+
+	/*
+	 * Set default identity path: ~/.gossip/identity.key
+	 */
+	if cfg.IdentityPath == "" {
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			cfg.IdentityPath = filepath.Join(homeDir, ".gossip", "identity.key")
+		} else {
+			cfg.IdentityPath = ".gossip/identity.key"
 		}
 	}
 

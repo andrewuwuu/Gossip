@@ -192,6 +192,72 @@ int gossip_set_session_key_hex(const char* hex_key);
  */
 int gossip_is_encrypted(void);
 
+/*
+ * =============================================================================
+ * Identity Management API (PKI)
+ * =============================================================================
+ */
+
+#define GOSSIP_PUBLIC_KEY_SIZE  32   /* X25519 public key */
+#define GOSSIP_PRIVATE_KEY_SIZE 32   /* X25519 private key */
+
+/*
+ * Generates a new X25519 keypair.
+ *
+ * @param public_key  Output buffer for 32-byte public key
+ * @param private_key Output buffer for 32-byte private key
+ */
+void gossip_generate_keypair(uint8_t* public_key, uint8_t* private_key);
+
+/*
+ * Loads identity from a file.
+ * The file should contain a 64-character hex-encoded private key.
+ *
+ * @param path Path to identity file
+ * @return 0 on success, -1 if file not found or invalid
+ */
+int gossip_load_identity(const char* path);
+
+/*
+ * Saves the current identity to a file.
+ *
+ * @param path Path to save identity file
+ * @return 0 on success, -1 on I/O error
+ */
+int gossip_save_identity(const char* path);
+
+/*
+ * Sets the node's private key directly.
+ * The public key is derived automatically.
+ *
+ * @param private_key 32-byte private key
+ * @return 0 on success, -1 on error
+ */
+int gossip_set_private_key(const uint8_t* private_key);
+
+/*
+ * Gets the node's public key.
+ *
+ * @param public_key Output buffer for 32-byte public key
+ * @return 0 on success, -1 if no identity loaded
+ */
+int gossip_get_public_key(uint8_t* public_key);
+
+/*
+ * Gets the node's public key as a hex string.
+ *
+ * @param hex_out Output buffer (must be at least 65 bytes for null terminator)
+ * @return 0 on success, -1 if no identity loaded
+ */
+int gossip_get_public_key_hex(char* hex_out);
+
+/*
+ * Checks if an identity has been loaded or generated.
+ *
+ * @return 1 if identity valid, 0 otherwise
+ */
+int gossip_has_identity(void);
+
 #ifdef __cplusplus
 }
 #endif

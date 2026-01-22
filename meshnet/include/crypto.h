@@ -112,6 +112,47 @@ bool secure_compare(const uint8_t* a, const uint8_t* b, size_t len);
  */
 void secure_zero(void* buf, size_t len);
 
+/*
+ * X25519 Key Exchange Constants
+ */
+constexpr size_t PUBLIC_KEY_SIZE = 32;   /* X25519 public key */
+constexpr size_t PRIVATE_KEY_SIZE = 32;  /* X25519 private key (seed) */
+constexpr size_t SHARED_SECRET_SIZE = 32; /* Derived shared secret */
+
+/*
+ * Generates a new X25519 keypair.
+ *
+ * @param public_key   Output buffer for 32-byte public key
+ * @param private_key  Output buffer for 32-byte private key
+ */
+void generate_keypair(uint8_t* public_key, uint8_t* private_key);
+
+/*
+ * Derives the public key from a private key.
+ *
+ * @param public_key   Output buffer for 32-byte public key
+ * @param private_key  32-byte private key
+ */
+void derive_public_key(uint8_t* public_key, const uint8_t* private_key);
+
+/*
+ * Derives a shared secret using X25519 Diffie-Hellman.
+ *
+ * @param shared_secret  Output buffer for 32-byte shared secret
+ * @param my_private     Our 32-byte private key
+ * @param their_public   Peer's 32-byte public key
+ *
+ * @return true on success, false if their_public is invalid
+ *
+ * SECURITY: The shared secret is suitable for direct use as an
+ * encryption key due to libsodium's internal hashing.
+ */
+bool derive_shared_secret(
+    uint8_t* shared_secret,
+    const uint8_t* my_private,
+    const uint8_t* their_public
+);
+
 }  /* namespace crypto */
 }  /* namespace gossip */
 

@@ -88,9 +88,26 @@ public:
     void set_event_callback(EventCallback cb) { event_callback_ = std::move(cb); }
     
     /*
-     * Sets the global cryptographic session key.
+     * Sets the global cryptographic session key (PSK mode - deprecated).
      */
     void set_session(std::shared_ptr<Session> session);
+    
+    /*
+     * Sets the node's identity for PKI-based key exchange.
+     * When identity is set, session keys are derived per-connection
+     * using X25519 Diffie-Hellman.
+     */
+    void set_identity(const uint8_t* public_key, const uint8_t* private_key);
+    
+    /*
+     * Returns the node's public key (if identity is set).
+     */
+    const uint8_t* public_key() const { return identity_public_key_; }
+    
+    /*
+     * Checks if this node has an identity configured.
+     */
+    bool has_identity() const { return has_identity_; }
     
     uint16_t node_id() const { return node_id_; }
     std::vector<PeerInfo> get_peers() const;
@@ -105,7 +122,14 @@ private:
     std::atomic<bool> running_;
     
     std::unique_ptr<ConnectionManager> conn_manager_;
-    std::shared_ptr<Session> session_;
+    std::shared_ptr<Session> session_;  /* deprecated: global PSK session */
+    
+    /*
+     * PKI identity (X25519 keypair)
+     */
+    bool has_identity_ = false;
+    uint8_t identity_public_key_[32];
+    uint8_t identity_private_key_[32];
     
     mutable std::mutex peers_mutex_;
     std::unordered_map<uint16_t, PeerInfo> peers_;

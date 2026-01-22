@@ -27,6 +27,7 @@ Thumbs.db
 *.test
 *.out
 go.work
+go.work.sum
 
 # Debug
 __debug_bin*

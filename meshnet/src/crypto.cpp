@@ -7,6 +7,7 @@
 
 #include "crypto.h"
 #include <sodium.h>
+#include <cstring>
 
 namespace gossip {
 namespace crypto {
@@ -105,6 +106,56 @@ bool secure_compare(const uint8_t* a, const uint8_t* b, size_t len) {
 
 void secure_zero(void* buf, size_t len) {
     sodium_memzero(buf, len);
+}
+
+void generate_keypair(uint8_t* public_key, uint8_t* private_key) {
+    /*
+     * crypto_kx_keypair generates a keypair for key exchange.
+     * The private key is the seed, public key is derived.
+     */
+    crypto_kx_keypair(public_key, private_key);
+}
+
+void derive_public_key(uint8_t* public_key, const uint8_t* private_key) {
+    /*
+     * Derive the public key from the private key seed.
+     * crypto_scalarmult_base computes public = private * basepoint.
+     */
+    crypto_scalarmult_base(public_key, private_key);
+}
+
+bool derive_shared_secret(
+    uint8_t* shared_secret,
+    const uint8_t* my_private,
+    const uint8_t* their_public
+) {
+    /*
+     * Perform X25519 scalar multiplication to derive shared secret.
+     * Both parties derive the same secret:
+     *   A: secret = my_priv * their_pub = a * B
+     *   B: secret = my_priv * their_pub = b * A
+     *   Since A = a*G and B = b*G, both derive a*b*G.
+     *
+     * crypto_scalarmult returns 0 on success, -1 if their_public is
+     * a low-order point (security check).
+     */
+    int result = crypto_scalarmult(shared_secret, my_private, their_public);
+    
+    if (result != 0) {
+        secure_zero(shared_secret, SHARED_SECRET_SIZE);
+        return false;
+    }
+    
+    /*
+     * Hash the raw shared secret for additional safety.
+     * This prevents issues with low-entropy DH outputs.
+     */
+    uint8_t hashed[crypto_generichash_BYTES];
+    crypto_generichash(hashed, sizeof(hashed), shared_secret, SHARED_SECRET_SIZE, nullptr, 0);
+    memcpy(shared_secret, hashed, SHARED_SECRET_SIZE);
+    secure_zero(hashed, sizeof(hashed));
+    
+    return true;
 }
 
 }  /* namespace crypto */

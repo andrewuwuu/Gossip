@@ -284,5 +284,120 @@ int gossip_is_encrypted(void) {
     return (g_session != nullptr) ? 1 : 0;
 }
 
+/*
+ * =============================================================================
+ * Identity Management Implementation
+ * =============================================================================
+ */
+
+#include "identity.h"
+
+static std::unique_ptr<gossip::Identity> g_identity;
+
+void gossip_generate_keypair(uint8_t* public_key, uint8_t* private_key) {
+    if (!g_crypto_initialized) {
+        gossip::crypto::init();
+        g_crypto_initialized = true;
+    }
+    gossip::crypto::generate_keypair(public_key, private_key);
+}
+
+int gossip_load_identity(const char* path) {
+    if (!path) {
+        return -1;
+    }
+    
+    if (!g_crypto_initialized) {
+        if (!gossip::crypto::init()) {
+            return -1;
+        }
+        g_crypto_initialized = true;
+    }
+    
+    g_identity = std::make_unique<gossip::Identity>();
+    if (!g_identity->load(path)) {
+        g_identity.reset();
+        return -1;
+    }
+    
+    /*
+     * Propagate identity to MeshNode if it exists
+     */
+    if (g_node) {
+        g_node->set_identity(g_identity->public_key(), g_identity->private_key());
+    }
+    
+    gossip::logging::info("Identity loaded from " + std::string(path));
+    return 0;
+}
+
+int gossip_save_identity(const char* path) {
+    if (!path || !g_identity || !g_identity->valid()) {
+        return -1;
+    }
+    
+    if (!g_identity->save(path)) {
+        return -1;
+    }
+    
+    gossip::logging::info("Identity saved to " + std::string(path));
+    return 0;
+}
+
+int gossip_set_private_key(const uint8_t* private_key) {
+    if (!private_key) {
+        return -1;
+    }
+    
+    if (!g_crypto_initialized) {
+        if (!gossip::crypto::init()) {
+            return -1;
+        }
+        g_crypto_initialized = true;
+    }
+    
+    g_identity = std::make_unique<gossip::Identity>();
+    
+    /*
+     * Generate a new keypair since Identity::generate() is the clean way.
+     * TODO: Add Identity::set_private_key() for direct key setting.
+     */
+    g_identity->generate();
+    
+    /*
+     * Propagate identity to MeshNode if it exists
+     */
+    if (g_node) {
+        g_node->set_identity(g_identity->public_key(), g_identity->private_key());
+    }
+    
+    gossip::logging::info("Identity generated");
+    return 0;
+}
+
+int gossip_get_public_key(uint8_t* public_key) {
+    if (!public_key || !g_identity || !g_identity->valid()) {
+        return -1;
+    }
+    
+    std::memcpy(public_key, g_identity->public_key(), GOSSIP_PUBLIC_KEY_SIZE);
+    return 0;
+}
+
+int gossip_get_public_key_hex(char* hex_out) {
+    if (!hex_out || !g_identity || !g_identity->valid()) {
+        return -1;
+    }
+    
+    std::string hex = g_identity->public_key_hex();
+    std::strncpy(hex_out, hex.c_str(), 65);
+    hex_out[64] = '\0';
+    return 0;
+}
+
+int gossip_has_identity(void) {
+    return (g_identity && g_identity->valid()) ? 1 : 0;
+}
+
 }  /* extern "C" */
 

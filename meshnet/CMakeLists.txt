@@ -30,6 +30,7 @@ set(SOURCES
     src/crypto.cpp
     src/session.cpp
     src/frame.cpp
+    src/identity.cpp
 )
 
 set(HEADERS
@@ -41,6 +42,7 @@ set(HEADERS
     include/crypto.h
     include/session.h
     include/frame.h
+    include/identity.h
 )
 
 add_library(gossipnet SHARED ${SOURCES} ${HEADERS})

@@ -61,6 +61,15 @@ void MeshNode::set_session(std::shared_ptr<Session> session) {
     }
 }
 
+void MeshNode::set_identity(const uint8_t* public_key, const uint8_t* private_key) {
+    if (public_key && private_key) {
+        std::memcpy(identity_public_key_, public_key, 32);
+        std::memcpy(identity_private_key_, private_key, 32);
+        has_identity_ = true;
+        gossip::logging::info("Identity configured for PKI key exchange");
+    }
+}
+
 /*
  * Implementation: start
  * 
@@ -93,9 +102,10 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
             event.peer_id = conn->node_id();
             push_event(std::move(event));
         });
-        
         /*
          * Send our ANNOUNCE to the new connection
+         * Payload format:
+         *   [port (2 bytes)] [public_key (32 bytes, optional)]
          */
         Packet announce(PacketType::ANNOUNCE, node_id_);
         std::vector<uint8_t> payload;
@@ -106,9 +116,12 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
         payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
         
         /*
-         * Note: announce.set_payload() copies the data.
-         * The connection will encrypt it if a session is active.
+         * Include public key if PKI identity is configured
          */
+        if (has_identity_) {
+            payload.insert(payload.end(), identity_public_key_, identity_public_key_ + 32);
+        }
+        
         announce.set_payload(payload);
         conn->send(announce);
     });
@@ -386,6 +399,29 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
                  */
                 const uint8_t* data = packet.payload().data();
                 uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
+                
+                /*
+                 * PKI Key Exchange: If payload includes public key (34 bytes)
+                 * and we have an identity, derive per-connection session key.
+                 */
+                if (has_identity_ && packet.payload().size() >= 34) {
+                    const uint8_t* peer_pubkey = data + 2;
+                    
+                    uint8_t shared_secret[32];
+                    if (crypto::derive_shared_secret(shared_secret, identity_private_key_, peer_pubkey)) {
+                        /*
+                         * Create per-connection session with derived key
+                         */
+                        auto derived_session = std::make_shared<Session>(shared_secret);
+                        conn->set_session(derived_session);
+                        
+                        gossip::logging::info("PKI: Derived session key for peer " + std::to_string(from_id));
+                        
+                        crypto::secure_zero(shared_secret, sizeof(shared_secret));
+                    } else {
+                        gossip::logging::warn("PKI: Failed to derive shared secret for peer " + std::to_string(from_id));
+                    }
+                }
                 
                 /*
                  * Register this connection with the node ID
