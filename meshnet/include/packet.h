@@ -219,7 +219,7 @@ struct MessagePayload {
         out.dest_id = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
         uint8_t username_len = data[2];
         
-        if (len < 3 + username_len) return false;
+        if (len < static_cast<size_t>(3 + username_len)) return false;
         
         out.username.assign(reinterpret_cast<const char*>(data + 3), username_len);
         out.message.assign(

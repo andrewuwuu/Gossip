@@ -121,6 +121,9 @@ private:
     uint16_t discovery_port_;
     std::atomic<bool> running_;
     
+    std::mutex events_mutex_;
+    std::queue<MeshEvent> events_;
+    
     std::unique_ptr<ConnectionManager> conn_manager_;
     std::shared_ptr<Session> session_;  /* deprecated: global PSK session */
     
@@ -134,8 +137,7 @@ private:
     mutable std::mutex peers_mutex_;
     std::unordered_map<uint16_t, PeerInfo> peers_;
     
-    std::mutex events_mutex_;
-    std::queue<MeshEvent> events_;
+
     
     EventCallback event_callback_;
     

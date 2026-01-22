@@ -63,7 +63,12 @@ bool Connection::send(const Packet& packet) {
      * Note: We copy the packet because we need to modify its payload
      * before serialization.
      */
-    if (session_) {
+    /*
+     * Encryption Logic:
+     * - Skip encryption for ANNOUNCE (key exchange handshake)
+     * - Encrypt all other packets if session is active
+     */
+    if (session_ && packet.type() != PacketType::ANNOUNCE) {
         Packet encrypted_packet = packet;
         std::vector<uint8_t> encrypted_payload;
         
@@ -161,6 +166,9 @@ void Connection::process_incoming() {
         recv_buffer_.insert(recv_buffer_.end(), buffer, buffer + n);
         
         while (try_parse_packet()) {
+            if (state_ != State::CONNECTED || socket_fd_ < 0) {
+                return;
+            }
         }
     }
 }
@@ -211,7 +219,11 @@ bool Connection::try_parse_packet() {
     /*
      * If encryption is enabled, decrypt the payload
      */
-    if (session_) {
+    /*
+     * If encryption is enabled, decrypt the payload
+     * EXCEPTION: ANNOUNCE packets are always plaintext (handshake)
+     */
+    if (session_ && host_header.type != static_cast<uint8_t>(PacketType::ANNOUNCE)) {
         std::vector<uint8_t> decrypted_payload;
         uint8_t flags_out;
         
@@ -449,9 +461,18 @@ void ConnectionManager::register_connection(uint16_t node_id, std::shared_ptr<Co
      * Check if we already have a connection for this node
      */
     if (connections_.count(node_id) > 0) {
-        gossip::logging::warn("Already connected to node " + std::to_string(node_id) + ". Closing duplicate.");
-        conn->close();
-        return;
+        auto existing = connections_[node_id];
+        if (existing->state() == Connection::State::CONNECTED) {
+            gossip::logging::warn("Already connected to node " + std::to_string(node_id) + ". Closing duplicate.");
+            conn->close();
+            return;
+        } else {
+            gossip::logging::info("Replacing dead connection for node " + std::to_string(node_id));
+            connections_.erase(node_id);
+            if (fd_to_node_.count(existing->socket_fd())) {
+                fd_to_node_.erase(existing->socket_fd());
+            }
+        }
     }
     
     connections_[node_id] = conn;

@@ -11,10 +11,9 @@ import "C"
 
 import (
 	"errors"
+	"gossip/internal/logging"
 	"sync"
 	"unsafe"
-
-	"gossip/internal/logging"
 )
 
 var (
@@ -64,6 +63,7 @@ type MeshNet struct {
 	eventCallback func(Event)
 	mu            sync.RWMutex
 	stopChan      chan struct{}
+	wg            sync.WaitGroup
 }
 
 var instance *MeshNet
@@ -110,6 +110,7 @@ func (m *MeshNet) Start(listenPort, discoveryPort uint16) error {
 	m.running = true
 	m.stopChan = make(chan struct{})
 
+	m.wg.Add(1)
 	go m.eventLoop()
 
 	return nil
@@ -117,13 +118,17 @@ func (m *MeshNet) Start(listenPort, discoveryPort uint16) error {
 
 func (m *MeshNet) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.running {
 		close(m.stopChan)
 		C.gossip_stop()
 		m.running = false
+		m.mu.Unlock() // Unlock before waiting to allow eventLoop to release read lock if needed
+		m.wg.Wait()
+		return
 	}
+	// Normal unlock if we didn't wait
+	m.mu.Unlock()
 }
 
 func (m *MeshNet) Destroy() {
@@ -352,6 +357,7 @@ func (m *MeshNet) IsEncrypted() bool {
 }
 
 func (m *MeshNet) eventLoop() {
+	defer m.wg.Done()
 	var cEvent C.GossipEvent
 
 	for {
@@ -359,6 +365,7 @@ func (m *MeshNet) eventLoop() {
 		case <-m.stopChan:
 			return
 		default:
+			// Poll with short timeout
 			result := C.gossip_poll_event(&cEvent, 100)
 			if result == 1 {
 				event := Event{
