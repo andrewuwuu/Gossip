@@ -107,22 +107,7 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
          * Payload format:
          *   [port (2 bytes)] [public_key (32 bytes, optional)]
          */
-        Packet announce(PacketType::ANNOUNCE, node_id_);
-        std::vector<uint8_t> payload;
-        /*
-         * Manual Big Endian serialization
-         */
-        payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
-        payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
-        
-        /*
-         * Include public key if PKI identity is configured
-         */
-        if (has_identity_) {
-            payload.insert(payload.end(), identity_public_key_, identity_public_key_ + 32);
-        }
-        
-        announce.set_payload(payload);
+        Packet announce = create_announce_packet();
         conn->send(announce);
     });
 
@@ -287,12 +272,7 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     /*
      * Send our ANNOUNCE
      */
-    Packet announce(PacketType::ANNOUNCE, node_id_);
-    std::vector<uint8_t> payload;
-    payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
-    payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
-    announce.set_payload(payload);
-    
+    Packet announce = create_announce_packet();
     conn->send(announce);
     
     return true;
@@ -561,20 +541,22 @@ void MeshNode::handle_discovery() {
                 const uint8_t* data = packet.payload().data();
                 uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
                 
-                std::lock_guard<std::mutex> lock(peers_mutex_);
-                if (peers_.find(packet.source_id()) == peers_.end()) {
-                    PeerInfo info;
-                    info.node_id = packet.source_id();
-                    info.address = addr_str;
-                    info.port = peer_port;
-                    info.last_seen = current_time_ms();
-                    info.hop_count = 1;
-                    peers_[info.node_id] = info;
-                    
-                    MeshEvent event;
-                    event.type = MeshEvent::Type::PEER_CONNECTED;
-                    event.peer_id = info.node_id;
-                    push_event(std::move(event));
+                /*
+                 * Logic for establishing TCP connection if not already present
+                 * Tie-breaker: only connect if our node_id > their node_id
+                 */
+                bool should_connect = false;
+                {
+                    std::lock_guard<std::mutex> lock(peers_mutex_);
+                    if (peers_.find(packet.source_id()) == peers_.end()) {
+                        if (node_id_ > packet.source_id()) {
+                            should_connect = true;
+                        }
+                    }
+                }
+                
+                if (should_connect) {
+                    connect_to_peer(addr_str, peer_port);
                 }
             }
         }
@@ -584,13 +566,7 @@ void MeshNode::handle_discovery() {
 void MeshNode::send_announce(const std::string& to_addr, uint16_t to_port) {
     if (discovery_socket_ < 0) return;
     
-    Packet announce(PacketType::ANNOUNCE, node_id_);
-    
-    std::vector<uint8_t> payload;
-    payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
-    payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
-    announce.set_payload(payload);
-    
+    Packet announce = create_announce_packet();
     auto data = announce.serialize();
     
     sockaddr_in addr{};
@@ -641,6 +617,23 @@ void MeshNode::cleanup_old_sequences() {
         std::advance(it, seen_sequences_.size() / 2);
         seen_sequences_.erase(seen_sequences_.begin(), it);
     }
+}
+
+Packet MeshNode::create_announce_packet() const {
+    Packet announce(PacketType::ANNOUNCE, node_id_);
+    std::vector<uint8_t> payload;
+    
+    /* Port (2 bytes, big endian) */
+    payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
+    payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
+    
+    /* Public Key (32 bytes) if identity set */
+    if (has_identity_) {
+        payload.insert(payload.end(), identity_public_key_, identity_public_key_ + 32);
+    }
+    
+    announce.set_payload(payload);
+    return announce;
 }
 
 }  // namespace gossip

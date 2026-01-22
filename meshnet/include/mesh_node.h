@@ -150,6 +150,7 @@ private:
     
     void handle_packet(std::shared_ptr<Connection> conn, const Packet& packet);
     void handle_discovery();
+    Packet create_announce_packet() const;
     void send_announce(const std::string& to_addr, uint16_t to_port);
     void forward_packet(const Packet& packet, uint16_t exclude_peer);
     
