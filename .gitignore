@@ -34,3 +34,6 @@ __debug_bin*
 
 # Logs
 *.logs
+
+#agent
+.agent/
