@@ -15,6 +15,7 @@
 
 #include "packet.h"
 #include "connection.h"
+#include "session.h"
 
 namespace gossip {
 
@@ -86,6 +87,11 @@ public:
     
     void set_event_callback(EventCallback cb) { event_callback_ = std::move(cb); }
     
+    /*
+     * Sets the global cryptographic session key.
+     */
+    void set_session(std::shared_ptr<Session> session);
+    
     uint16_t node_id() const { return node_id_; }
     std::vector<PeerInfo> get_peers() const;
     bool is_running() const { return running_.load(); }
@@ -99,6 +105,7 @@ private:
     std::atomic<bool> running_;
     
     std::unique_ptr<ConnectionManager> conn_manager_;
+    std::shared_ptr<Session> session_;
     
     mutable std::mutex peers_mutex_;
     std::unordered_map<uint16_t, PeerInfo> peers_;

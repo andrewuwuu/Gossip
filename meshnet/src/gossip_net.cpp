@@ -1,6 +1,9 @@
 #include "gossip_net.h"
 #include "mesh_node.h"
 #include "logging.h"
+#include "crypto.h"
+#include "session.h"
+#include "frame.h"
 
 #include <memory>
 #include <cstring>
@@ -13,7 +16,14 @@ static std::mutex g_event_queue_mutex;
 static std::queue<gossip::MeshEvent> g_pending_events;
 static bool g_callback_set = false;
 
+/*
+ * Session key state for encryption.
+ */
+static std::shared_ptr<gossip::Session> g_session;
+static bool g_crypto_initialized = false;
+
 extern "C" {
+
 
 /*
  * Implementation: gossip_init
@@ -199,4 +209,80 @@ int gossip_is_running(void) {
     return (g_node && g_node->is_running()) ? 1 : 0;
 }
 
-}  // extern "C"
+/*
+ * Helper function to convert a hex character to its value.
+ */
+static int hex_char_to_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+    return -1;
+}
+
+int gossip_set_session_key(const uint8_t* key) {
+    if (!key) {
+        return -1;
+    }
+    
+    if (g_node && g_node->is_running()) {
+        return -1;  /* Cannot change key while running */
+    }
+    
+    /*
+     * Initialize crypto subsystem if not already done.
+     */
+    if (!g_crypto_initialized) {
+        if (!gossip::crypto::init()) {
+            return -1;
+        }
+        g_crypto_initialized = true;
+    }
+    
+    g_session = std::make_shared<gossip::Session>(key);
+    
+    if (g_node) {
+        g_node->set_session(g_session);
+    }
+    
+    gossip::logging::info("Session key configured, encryption enabled");
+    return 0;
+}
+
+int gossip_set_session_key_hex(const char* hex_key) {
+    if (!hex_key) {
+        return -1;
+    }
+    
+    size_t len = std::strlen(hex_key);
+    if (len != GOSSIP_KEY_SIZE * 2) {
+        return -1;  /* Must be exactly 64 hex characters */
+    }
+    
+    uint8_t key[GOSSIP_KEY_SIZE];
+    for (size_t i = 0; i < GOSSIP_KEY_SIZE; ++i) {
+        int high = hex_char_to_value(hex_key[i * 2]);
+        int low = hex_char_to_value(hex_key[i * 2 + 1]);
+        
+        if (high < 0 || low < 0) {
+            return -1;  /* Invalid hex character */
+        }
+        
+        key[i] = static_cast<uint8_t>((high << 4) | low);
+    }
+    
+    int result = gossip_set_session_key(key);
+    
+    /*
+     * Securely zero the temporary key buffer.
+     */
+    gossip::crypto::secure_zero(key, GOSSIP_KEY_SIZE);
+    
+    return result;
+}
+
+int gossip_is_encrypted(void) {
+    return (g_session != nullptr) ? 1 : 0;
+}
+
+}  /* extern "C" */
+

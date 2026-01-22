@@ -48,11 +48,39 @@ MeshNode::~MeshNode() {
  * 2. Sets up connection callbacks (packet handling, disconnects)
  * 3. Creates and binds the UDP discovery socket
  */
+/*
+ * Implementation: set_session
+ * 
+ * Configures the cryptographic session and propagates it to the ConnectionManager.
+ * If called before start(), the session is stored and applied later.
+ */
+void MeshNode::set_session(std::shared_ptr<Session> session) {
+    session_ = std::move(session);
+    if (conn_manager_) {
+        conn_manager_->set_session(session_);
+    }
+}
+
+/*
+ * Implementation: start
+ * 
+ * Initializes the MeshNode.
+ * 1. Starts the ConnectionManager (TCP)
+ * 2. Sets up connection callbacks (packet handling, disconnects)
+ * 3. Creates and binds the UDP discovery socket
+ */
 bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
     listen_port_ = listen_port;
     discovery_port_ = discovery_port;
     
     conn_manager_ = std::make_unique<ConnectionManager>(listen_port);
+    
+    /*
+     * Propagate session key if set
+     */
+    if (session_) {
+        conn_manager_->set_session(session_);
+    }
     
     conn_manager_->set_connection_callback([this](std::shared_ptr<Connection> conn) {
         conn->set_packet_callback([this, conn](const Packet& packet) {
@@ -76,6 +104,11 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
          */
         payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
         payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
+        
+        /*
+         * Note: announce.set_payload() copies the data.
+         * The connection will encrypt it if a session is active.
+         */
         announce.set_payload(payload);
         conn->send(announce);
     });

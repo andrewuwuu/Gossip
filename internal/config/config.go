@@ -20,6 +20,7 @@ type Config struct {
 	Debug         bool
 	StoreHistory  bool
 	HistoryPath   string
+	SessionKey    string /* Optional: 64-char hex key for encryption */
 }
 
 func Load() (*Config, error) {
@@ -35,6 +36,7 @@ func Load() (*Config, error) {
 		Debug:         getEnvBoolOrDefault("DEBUG", false),
 		StoreHistory:  getEnvBoolOrDefault("STORE_HISTORY", false),
 		HistoryPath:   getEnvOrDefault("HISTORY_PATH", ""),
+		SessionKey:    os.Getenv("GOSSIP_SESSION_KEY"),
 	}
 
 	nodeIDStr := os.Getenv("NODE_ID")

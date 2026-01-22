@@ -63,6 +63,17 @@ func (c *CLI) Run() error {
 		c.handleEvent(event)
 	})
 
+	/*
+	 * Configure encryption if session key is provided.
+	 */
+	if c.config.SessionKey != "" {
+		if err := c.mesh.SetSessionKeyHex(c.config.SessionKey); err != nil {
+			c.printf("Warning: Invalid session key, encryption disabled: %v\n", err)
+		} else {
+			c.printf("Encryption enabled (XChaCha20-Poly1305)\n")
+		}
+	}
+
 	if err := c.mesh.Start(c.config.NodePort, c.config.DiscoveryPort); err != nil {
 		return fmt.Errorf("failed to start mesh: %w", err)
 	}
@@ -327,6 +338,7 @@ func (c *CLI) showInfo() {
 	c.printf("Username:       %s", c.config.Username)
 	c.printf("Listen Port:    %d", c.config.NodePort)
 	c.printf("Discovery Port: %d", c.config.DiscoveryPort)
+	c.printf("Encrypted:      %v", c.mesh.IsEncrypted())
 	c.printf("Store History:  %v", c.config.StoreHistory)
 	c.printf("Connected Peers: %d", c.peers.Count())
 }

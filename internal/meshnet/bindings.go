@@ -2,7 +2,7 @@ package meshnet
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../meshnet/include
-#cgo LDFLAGS: -L${SRCDIR}/../../meshnet/build -lgossipnet -lstdc++ -lpthread
+#cgo LDFLAGS: -L${SRCDIR}/../../meshnet/build -lgossipnet -lstdc++ -lpthread -lsodium
 
 #include "gossip_net.h"
 #include <stdlib.h>
@@ -18,12 +18,18 @@ import (
 )
 
 var (
-	ErrNotInitialized = errors.New("mesh network not initialized")
-	ErrNotRunning     = errors.New("mesh network not running")
-	ErrInvalidParam   = errors.New("invalid parameter")
+	ErrNotInitialized   = errors.New("mesh network not initialized")
+	ErrNotRunning       = errors.New("mesh network not running")
+	ErrInvalidParam     = errors.New("invalid parameter")
+	ErrAlreadyRunning   = errors.New("cannot change key while running")
+	ErrInvalidKeyLength = errors.New("key must be 32 bytes")
+	ErrInvalidHex       = errors.New("invalid hex string")
 )
 
-const maxMessageLen = 512
+const (
+	maxMessageLen = 512
+	KeySize       = 32 // 256-bit symmetric key
+)
 
 type EventType int
 
@@ -276,6 +282,73 @@ func (m *MeshNet) SetEventCallback(callback func(Event)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.eventCallback = callback
+}
+
+/*
+ * SetSessionKey sets the 32-byte session key for encrypted communication.
+ * Must be called AFTER New() and BEFORE Start().
+ * All peers must use the same key to communicate.
+ */
+func (m *MeshNet) SetSessionKey(key []byte) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.initialized {
+		return ErrNotInitialized
+	}
+
+	if m.running {
+		return ErrAlreadyRunning
+	}
+
+	if len(key) != KeySize {
+		return ErrInvalidKeyLength
+	}
+
+	result := C.gossip_set_session_key((*C.uint8_t)(unsafe.Pointer(&key[0])))
+	if result != 0 {
+		return errors.New("failed to set session key")
+	}
+
+	return nil
+}
+
+/*
+ * SetSessionKeyHex sets the session key from a 64-character hex string.
+ * Convenience function for loading keys from environment variables.
+ */
+func (m *MeshNet) SetSessionKeyHex(hexKey string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if !m.initialized {
+		return ErrNotInitialized
+	}
+
+	if m.running {
+		return ErrAlreadyRunning
+	}
+
+	if len(hexKey) != KeySize*2 {
+		return ErrInvalidHex
+	}
+
+	cHexKey := C.CString(hexKey)
+	defer C.free(unsafe.Pointer(cHexKey))
+
+	result := C.gossip_set_session_key_hex(cHexKey)
+	if result != 0 {
+		return ErrInvalidHex
+	}
+
+	return nil
+}
+
+/*
+ * IsEncrypted returns true if encryption is enabled (session key has been set).
+ */
+func (m *MeshNet) IsEncrypted() bool {
+	return C.gossip_is_encrypted() == 1
 }
 
 func (m *MeshNet) eventLoop() {

@@ -12,10 +12,13 @@ The network layer is built as a shared/static C++ library (`libgossipnet`) that 
 2. **ConnectionManager**: Tracks all active peer connections using `epoll` for event multiplexing.
 3. **MeshNode**: Manages peer discovery (UDP), connection initiation, and packet routing.
 4. **Packet**: Binary serialization/deserialization with Big Endian enforcement.
+5. **Crypto**: XChaCha20-Poly1305 AEAD encryption using libsodium.
+6. **Session**: Manages symmetric keys, sequence numbers, and 64-message replay window.
+7. **Frame**: Encrypted frame serialization/deserialization per Gossip Protocol v0.1.
 
 ## Protocol Detail
 
-### Packet Header (14 bytes)
+### Packet Header (12 bytes)
 
 | Offset | Field | Size | Type | Description |
 |---|---|---|---|---|
@@ -26,7 +29,21 @@ The network layer is built as a shared/static C++ library (`libgossipnet`) that 
 | 4 | Payload Len | 2 | uint16 | Length of the following data |
 | 6 | Sequence | 4 | uint32 | Unique ID for the packet |
 | 10 | Source ID | 2 | uint16 | Originating node ID |
-| 12 | Dest ID | 2 | uint16 | Destination node ID |
+
+### Encrypted Frame (Gossip Protocol v0.1)
+
+When encryption is enabled, message payloads are wrapped in an encrypted frame:
+
+| Offset | Field | Size | Description |
+|---|---|---|---|
+| 0 | Version | 1 | Frame format version (0x01) |
+| 1 | Flags | 1 | Frame flags |
+| 2 | Sequence | 8 | 64-bit sequence (big-endian) |
+| 10 | Nonce | 24 | Random XChaCha20 nonce |
+| 34 | Ciphertext | N | Encrypted payload |
+| 34+N | Tag | 16 | Poly1305 auth tag |
+
+**AAD (Authenticated Additional Data)**: `version | flags | seq` (10 bytes)
 
 ### Packet Types
 - `0x01` PING / `0x02` PONG
@@ -45,8 +62,19 @@ Uses CMake to produce:
 - `libgossipnet.so`: Shared library for dynamic linking.
 - `libgossipnet.a`: Static library for integrated builds.
 
+**Build Options:**
+- `-DSTATIC_LIBSODIUM=ON`: Link libsodium statically (for portable builds)
+- `-DBUILD_TESTS=ON`: Build unit tests
+
 ```bash
 mkdir build && cd build
-cmake ..
+cmake .. -DCMAKE_BUILD_TYPE=Release
 make
 ```
+
+### Dependencies
+
+- **libsodium**: Required for cryptographic operations
+  - Ubuntu/Debian: `apt install libsodium-dev`
+  - Termux: `pkg install libsodium`
+

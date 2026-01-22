@@ -58,6 +58,30 @@ Connection& Connection::operator=(Connection&& other) noexcept {
 }
 
 bool Connection::send(const Packet& packet) {
+    /*
+     * If encryption is enabled, we wrap the payload in an EncryptedFrame.
+     * Note: We copy the packet because we need to modify its payload
+     * before serialization.
+     */
+    if (session_) {
+        Packet encrypted_packet = packet;
+        std::vector<uint8_t> encrypted_payload;
+        
+        if (!EncryptedFrame::encrypt(
+                *session_,
+                packet.payload().data(),
+                packet.payload().size(),
+                FRAME_FLAG_NONE,
+                encrypted_payload)) {
+            gossip::logging::error("Encryption failed");
+            return false;
+        }
+        
+        encrypted_packet.set_payload(encrypted_payload);
+        auto data = encrypted_packet.serialize();
+        return send_raw(data.data(), data.size());
+    }
+
     auto data = packet.serialize();
     return send_raw(data.data(), data.size());
 }
@@ -183,6 +207,33 @@ bool Connection::try_parse_packet() {
         recv_buffer_.begin() + HEADER_SIZE,
         recv_buffer_.begin() + total_size
     );
+    
+    /*
+     * If encryption is enabled, decrypt the payload
+     */
+    if (session_) {
+        std::vector<uint8_t> decrypted_payload;
+        uint8_t flags_out;
+        
+        if (!EncryptedFrame::decrypt(
+                *session_,
+                payload.data(),
+                payload.size(),
+                decrypted_payload,
+                flags_out)) {
+            gossip::logging::error("Decryption failed (auth/replay) - dropping connection");
+            recv_buffer_.clear(); // Drop connection
+            state_ = State::ERROR;
+            if (disconnect_callback_) disconnect_callback_();
+            return false;
+        }
+        
+        payload = std::move(decrypted_payload);
+        
+        // Note: Packet header payload_length will mismatch now. 
+        // We construct Packet with the decrypted payload, which updates the header.
+        host_header.payload_length = static_cast<uint16_t>(payload.size());
+    }
     
     Packet packet(host_header, payload);
     
@@ -310,6 +361,20 @@ void ConnectionManager::stop() {
     }
 }
 
+void ConnectionManager::set_session(std::shared_ptr<Session> session) {
+    session_ = std::move(session);
+    
+    std::lock_guard<std::mutex> lock(connections_mutex_);
+    
+    for (auto& [id, conn] : connections_) {
+        conn->set_session(session_);
+    }
+    
+    for (auto& conn : unregistered_connections_) {
+        conn->set_session(session_);
+    }
+}
+
 std::shared_ptr<Connection> ConnectionManager::connect_to(const std::string& addr, uint16_t port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -336,6 +401,9 @@ std::shared_ptr<Connection> ConnectionManager::connect_to(const std::string& add
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
     
     auto conn = std::make_shared<Connection>(sock, addr, port);
+    if (session_) {
+        conn->set_session(session_);
+    }
     
     epoll_event ev{};
     ev.events = EPOLLIN | EPOLLET;
@@ -506,6 +574,10 @@ void ConnectionManager::accept_connections() {
         auto conn = std::make_shared<Connection>(
             client_fd, addr_str, ntohs(client_addr.sin_port)
         );
+        
+        if (session_) {
+            conn->set_session(session_);
+        }
         
         epoll_event ev{};
         ev.events = EPOLLIN | EPOLLET;

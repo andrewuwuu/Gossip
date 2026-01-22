@@ -18,6 +18,13 @@ extern "C" {
 #define GOSSIP_MAX_MESSAGE_LEN   512
 
 /*
+ * Cryptographic constants for Gossip Protocol v0.1.
+ */
+#define GOSSIP_KEY_SIZE    32   /* 256-bit symmetric session key */
+#define GOSSIP_NONCE_SIZE  24   /* XChaCha20 nonce */
+#define GOSSIP_TAG_SIZE    16   /* Poly1305 authentication tag */
+
+/*
  * GossipEvent struct layout - NATURALLY ALIGNED for CGo compatibility
  * 
  * Uses 64-bit types for numeric fields to ensure identical 8-byte alignment
@@ -158,6 +165,32 @@ int gossip_get_peer_count(void);
  * @return 1 if running, 0 otherwise
  */
 int gossip_is_running(void);
+
+/*
+ * Sets the 32-byte session key for encrypted communication.
+ * Must be called AFTER gossip_init() and BEFORE gossip_start().
+ * All peers must use the same key to communicate.
+ *
+ * @param key Pointer to 32-byte key buffer
+ * @return 0 on success, -1 if key is NULL or network already started
+ */
+int gossip_set_session_key(const uint8_t* key);
+
+/*
+ * Sets the session key from a hex-encoded string.
+ * Convenience function that parses a 64-character hex string.
+ *
+ * @param hex_key 64-character hex string (e.g., from openssl rand -hex 32)
+ * @return 0 on success, -1 if invalid hex or wrong length
+ */
+int gossip_set_session_key_hex(const char* hex_key);
+
+/*
+ * Checks if encryption is enabled (session key has been set).
+ *
+ * @return 1 if encryption enabled, 0 otherwise
+ */
+int gossip_is_encrypted(void);
 
 #ifdef __cplusplus
 }

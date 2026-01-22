@@ -11,6 +11,8 @@
 #include <queue>
 
 #include "packet.h"
+#include "session.h"
+#include "frame.h"
 
 namespace gossip {
 
@@ -75,6 +77,13 @@ public:
     uint16_t node_id() const { return node_id_; }
     void set_node_id(uint16_t id) { node_id_ = id; }
     
+    /*
+     * Sets the cryptographic session for this connection.
+     * If set, all subsequent traffic will be encrypted/decrypted.
+     */
+    void set_session(std::shared_ptr<Session> session) { session_ = std::move(session); }
+    bool is_encrypted() const { return session_ != nullptr; }
+
     void close();
 
 private:
@@ -90,6 +99,12 @@ private:
     PacketCallback packet_callback_;
     DisconnectCallback disconnect_callback_;
     
+    /*
+     * Active cryptographic session (may be null).
+     * If null, communication is plaintext.
+     */
+    std::shared_ptr<Session> session_;
+
     bool try_parse_packet();
 };
 
@@ -123,6 +138,11 @@ public:
         connection_callback_ = std::move(cb);
     }
     
+    /*
+     * Sets the session for all new and existing connections.
+     */
+    void set_session(std::shared_ptr<Session> session);
+    
     void poll(int timeout_ms);
     
     size_t connection_count() const;
@@ -140,6 +160,11 @@ private:
     std::vector<std::shared_ptr<Connection>> unregistered_connections_;
     
     std::function<void(std::shared_ptr<Connection>)> connection_callback_;
+    
+    /*
+     * Global session for all connections (Pre-shared key architecture).
+     */
+    std::shared_ptr<Session> session_;
     
     void accept_connections();
     bool set_nonblocking(int fd);

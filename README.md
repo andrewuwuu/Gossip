@@ -14,7 +14,7 @@ Gossip uses a hybrid architecture:
 - [x] **Mesh Routing**: Nodes automatically forward messages to reach peers not in direct range.
 - [x] **Reliable Transport**: TCP-based connections with custom packet framing and heartbeat.
 - [x] **Cross-Platform Support**: Optimized for Linux (WSL2), Linux (Native), and Android (Termux).
-- [ ] **Encryption**: (Planned) P2P encryption using ChaCha20-Poly1305.
+- [x] **Encryption**: XChaCha20-Poly1305 AEAD encryption with replay protection (Gossip Protocol v0.1).
 
 ## Project Structure
 
@@ -60,7 +60,26 @@ Configuration is managed via the `.env` file:
 NODE_PORT=19000
 DISCOVERY_PORT=19001
 USERNAME=anonymous
+
+# Optional: Enable encryption (64-char hex, generate with: openssl rand -hex 32)
+# GOSSIP_SESSION_KEY=your_64_char_hex_key_here
 ```
+
+### Enabling Encryption
+
+To enable encrypted messaging between peers:
+
+1. Generate a shared key:
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. Set the key on all peers (via `.env` or environment):
+   ```bash
+   export GOSSIP_SESSION_KEY=<your_64_char_hex_key>
+   ```
+
+All peers must use the same key to communicate. Without a key, messages are sent unencrypted.
 
 ## Protocol Specification
 
