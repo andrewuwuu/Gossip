@@ -132,10 +132,12 @@ bool Connection::send_raw(const uint8_t* data, size_t len) {
                 continue;
             }
             state_ = State::ERROR;
+            gossip::logging::error("Send failed: " + std::string(strerror(errno)));
             return false;
         }
         sent += n;
     }
+    // gossip::logging::debug("Sent " + std::to_string(len) + " bytes");
     
     return true;
 }
@@ -531,7 +533,7 @@ std::shared_ptr<Connection> ConnectionManager::connect_to(const std::string& add
     }
     
     epoll_event ev{};
-    ev.events = EPOLLIN | EPOLLET;
+    ev.events = EPOLLIN; /* Level Triggered for safety */
     ev.data.fd = sock;
     epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, sock, &ev);
     
@@ -741,7 +743,7 @@ void ConnectionManager::accept_connections() {
         }
         
         epoll_event ev{};
-        ev.events = EPOLLIN | EPOLLET;
+        ev.events = EPOLLIN; /* Level Triggered for safety */
         ev.data.fd = client_fd;
         epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &ev);
         
