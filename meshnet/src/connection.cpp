@@ -86,23 +86,23 @@ bool Connection::send(const Packet& packet) {
      * - Encrypt all other packets if session is active
      */
     if (session_) {
-        Packet encrypted_packet = packet;
-        std::vector<uint8_t> encrypted_payload;
+        std::vector<uint8_t> frame_out;
+        uint64_t seq_out;
         
-        if (!EncryptedFrame::encrypt(
+        /* Encrypt internal payload using FrameV1 MSG type */
+        if (!FrameV1::encrypt(
                 *session_,
+                protocol::MessageType::MSG,
                 packet.payload().data(),
                 packet.payload().size(),
-                FRAME_FLAG_NONE,
-                encrypted_payload)) {
+                frame_out,
+                seq_out)) {
             gossip::logging::error("Encryption failed");
-            close(); /* Close connection on critical encryption failure (e.g. key exhaustion) */
+            close();
             return false;
         }
         
-        encrypted_packet.set_payload(encrypted_payload);
-        auto data = encrypted_packet.serialize();
-        return send_raw(data.data(), data.size());
+        return send_raw(frame_out.data(), frame_out.size());
     }
 
     auto data = packet.serialize();
@@ -116,7 +116,7 @@ bool Connection::send(const Packet& packet) {
  * - Handles EAGAIN/EWOULDBLOCK by returning early (retry logic needed by caller? 
  *   Currently returns false, effectively dropping packet if socket full?)
  * - Note: This implementation busy-waits on partial writes unless EAGAIN occurs.
- *   For robust ness, partial writes should be buffered.
+ *   For robustness, partial writes should be buffered.
  */
 bool Connection::send_raw(const uint8_t* data, size_t len) {
     /* Allow sending if Connected or Handshaking */
