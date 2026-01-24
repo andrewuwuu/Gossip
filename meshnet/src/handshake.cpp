@@ -5,6 +5,8 @@
  */
 
 #include "handshake.h"
+#include "logging.h"
+#include <cstdio>
 #include <cstring>
 
 namespace gossip {
@@ -119,14 +121,14 @@ bool Handshake::process_hello(const uint8_t* data, size_t len) {
         
         /* Order HELLOs for transcript: initiator first */
         if (role_ == protocol::HandshakeRole::INITIATOR) {
-            /* We are initiator, our HELLO is first */
+            /* We are initiator, peer is responder. Store peer's hello as hello_resp_ */
             hello_resp_ = peer_hello;
         } else {
-            /* We are responder, peer's HELLO is first */
-            hello_init_ = peer_hello;
-            /* We need to move our HELLO to resp position */
-            hello_resp_ = hello_init_;
-            hello_init_ = peer_hello;
+            /* We are responder, peer is initiator. Store peer's hello as hello_init_ */
+            /* Note: Our hello is already in hello_resp_ if we created it, or will be later */
+            if (hello_init_.empty()) {
+                hello_init_ = peer_hello;
+            }
         }
         
     } else if (state_ == HandshakeState::INITIAL) {
@@ -214,18 +216,28 @@ bool Handshake::derive_keys() {
     uint8_t prk[crypto::HASH_SIZE];
     crypto::hkdf_extract(transcript_hash_, crypto::HASH_SIZE, ikm, sizeof(ikm), prk);
     
-    /* Wipe IKM immediately */
-    crypto::secure_zero(ikm, sizeof(ikm));
-    
     /* Step 3: HKDF-Expand for K_init */
     crypto::hkdf_expand_label(prk, "gossip-init", k_init_);
     
     /* Step 4: HKDF-Expand for K_resp */
     crypto::hkdf_expand_label(prk, "gossip-resp", k_resp_);
     
+    char key_debug[256];
+    std::snprintf(key_debug, sizeof(key_debug), 
+        "Keys derived. K_init=%02x%02x%02x%02x K_resp=%02x%02x%02x%02x Transcript=%02x%02x%02x%02x Shared=%02x%02x%02x%02x",
+        k_init_[0], k_init_[1], k_init_[2], k_init_[3],
+        k_resp_[0], k_resp_[1], k_resp_[2], k_resp_[3],
+        transcript_hash_[0], transcript_hash_[1], transcript_hash_[2], transcript_hash_[3],
+        ikm[0], ikm[1], ikm[2], ikm[3]
+    );
+    gossip::logging::debug(key_debug);
+
+    /* Wipe IKM immediately */
+    crypto::secure_zero(ikm, sizeof(ikm));
+    
     /* Wipe PRK */
     crypto::secure_zero(prk, sizeof(prk));
-    
+
     /* Wipe ephemeral private key - no longer needed */
     crypto::secure_zero(ephemeral_private_, sizeof(ephemeral_private_));
     

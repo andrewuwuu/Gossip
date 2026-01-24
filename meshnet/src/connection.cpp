@@ -203,7 +203,7 @@ void Connection::process_incoming() {
         recv_buffer_.insert(recv_buffer_.end(), buffer, buffer + n);
         
         while (try_parse_packet()) {
-            if (state_ != State::CONNECTED || socket_fd_ < 0) {
+            if ((state_ != State::CONNECTED && state_ != State::HANDSHAKING) || socket_fd_ < 0) {
                 return;
             }
         }
