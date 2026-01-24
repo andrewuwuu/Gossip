@@ -151,7 +151,7 @@ func (c *CLI) handleCommand(line string) {
 
 	case "/discover", "/d":
 		c.mesh.Discover()
-		c.printf("Sending discovery broadcast...\n")
+		c.printf("Sending v1.0 UDP Discovery Beacon (port %d)...\n", c.config.DiscoveryPort)
 
 	case "/connect", "/c":
 		if len(parts) < 3 {

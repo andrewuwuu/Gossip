@@ -15,7 +15,10 @@ namespace {
 
 constexpr size_t kMaxLogBytes = 2048;
 
-std::mutex log_mutex;
+std::mutex& log_mutex() {
+    static std::mutex* m = new std::mutex();
+    return *m;
+}
 
 std::ofstream& log_stream() {
     static std::ofstream stream("gossip.logs", std::ios::app);
@@ -64,7 +67,7 @@ void log_line(const char* level, const std::string& message) {
     if (sanitized.empty()) {
         return;
     }
-    std::lock_guard<std::mutex> lock(log_mutex);
+    std::lock_guard<std::mutex> lock(log_mutex());
     stream << timestamp() << " [" << level << "] " << sanitized << '\n';
     stream.flush();
 }
