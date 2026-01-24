@@ -162,8 +162,10 @@ private:
     void push_event(MeshEvent event);
     bool is_duplicate(uint16_t source_id, uint32_t sequence);
     void cleanup_old_sequences();
+    
+    std::mutex lifecycle_mutex_;
 };
 
-}  // namespace gossip
-
-#endif  // GOSSIP_MESH_NODE_H
+}  /* namespace gossip */
+ 
+#endif  /* GOSSIP_MESH_NODE_H */

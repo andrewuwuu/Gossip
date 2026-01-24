@@ -72,7 +72,7 @@ void log_line(const char* level, const std::string& message) {
     stream.flush();
 }
 
-}  // namespace
+}  /* namespace */
 
 void debug(const std::string& message) {
     log_line("DEBUG", message);
@@ -90,5 +90,5 @@ void error(const std::string& message) {
     log_line("ERROR", message);
 }
 
-}  // namespace logging
-}  // namespace gossip
+}  /* namespace logging */
+}  /* namespace gossip */

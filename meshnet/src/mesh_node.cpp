@@ -27,7 +27,7 @@ uint32_t make_seq_key(uint16_t source_id, uint32_t sequence) {
     return (static_cast<uint32_t>(source_id) << 16) | (sequence & 0xFFFF);
 }
 
-}  // namespace
+}  /* namespace */
 
 MeshNode::MeshNode(uint16_t node_id)
     : node_id_(node_id)
@@ -86,6 +86,7 @@ void MeshNode::set_identity(const uint8_t* public_key, const uint8_t* secret_key
  * 3. Creates and binds the UDP discovery socket
  */
 bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
     listen_port_ = listen_port;
     discovery_port_ = discovery_port;
     
@@ -185,7 +186,8 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
 }
 
 void MeshNode::stop() {
-    running_ = false;
+    running_ = false;  /* Signal stop first */
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);  /* Wait for poll to finish */
     
     if (discovery_socket_ >= 0) {
         ::close(discovery_socket_);
@@ -221,7 +223,7 @@ bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
     Packet packet(PacketType::MSG, node_id_);
     
     if (require_ack) {
-        // Ack not supported in v1.0 spec table
+        /* Ack not supported in v1.0 spec table */
     }
     
     MessagePayload payload;
@@ -367,38 +369,37 @@ void MeshNode::discover_peers() {
     /* 
      * Beacon framing constants 
      */
-    constexpr uint8_t BEACON_MAGIC[2] = {0x47, 0x52}; // "GR"
+    constexpr uint8_t BEACON_MAGIC[2] = {0x47, 0x52};  /* "GR" */
     constexpr uint8_t BEACON_VERSION = 0x01;
     
     std::vector<uint8_t> beacon;
-    beacon.reserve(109); // 2+1+32+8+64+2
+    beacon.reserve(109);  /* 2+1+32+8+64+2 */
     
-    // Magic (2)
+    /* Magic (2) */
     beacon.push_back(BEACON_MAGIC[0]);
     beacon.push_back(BEACON_MAGIC[1]);
     
-    // Version (1)
+    /* Version (1) */
     beacon.push_back(BEACON_VERSION);
     
-    // IK_pub (32)
+    /* IK_pub (32) */
     beacon.insert(beacon.end(), identity_public_key_, identity_public_key_ + 32);
     
-    // Timestamp (8, Big Endian Seconds)
+    /* Timestamp (8, Big Endian Seconds) */
     uint64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
     
-    // uint64_t now_be = htobe64(now_sec); // Requires endian.h or manual
-    // Portable manual BE encoding for uint64
+    /* Portable manual BE encoding for uint64 */
     for (int i = 7; i >= 0; --i) {
         beacon.push_back(static_cast<uint8_t>((now_sec >> (i * 8)) & 0xFF));
     }
     
-    // Signature Input: Magic || Version || IK_pub || Timestamp
+    /* Signature Input: Magic || Version || IK_pub || Timestamp */
     if (identity_) {
         uint8_t signature[64];
         if (identity_->sign(beacon.data(), beacon.size(), signature)) {
-            // Append Signature (64)
+            /* Append Signature (64) */
             beacon.insert(beacon.end(), signature, signature + 64);
         } else {
              gossip::logging::error("Failed to sign discovery beacon");
@@ -408,7 +409,7 @@ void MeshNode::discover_peers() {
         return; 
     }
     
-    // Append Listen Port (2, Big Endian) - Extension to spec to allow connection
+    /* Append Listen Port (2, Big Endian) - Extension to spec to allow connection */
     beacon.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
     beacon.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
     
@@ -440,6 +441,7 @@ std::vector<PeerInfo> MeshNode::get_peers() const {
  * 3. Dispatches queued events to the application callback
  */
 void MeshNode::poll_events(int timeout_ms) {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mutex_);
     if (!running_) return;
     
     conn_manager_->poll(timeout_ms);
@@ -530,25 +532,25 @@ void MeshNode::handle_discovery() {
             break;
         }
         
-        // Expected size: 109 bytes (107 beacon + 2 port)
+        /* Expected size: 109 bytes (107 beacon + 2 port) */
         if (n < 109) continue;
         
-        // Verify Magic (GR)
+        /* Verify Magic (GR) */
         if (buffer[0] != 0x47 || buffer[1] != 0x52) continue;
         
-        // Verify Version (1)
+        /* Verify Version (1) */
         if (buffer[2] != 0x01) continue;
         
-        // Extract fields
+        /* Extract fields */
         const uint8_t* ik_pub = buffer + 3;
-        const uint8_t* timestamp_ptr = buffer + 35; // 3 + 32
-        const uint8_t* signature = buffer + 43;     // 35 + 8
-        const uint8_t* port_ptr = buffer + 107;     // 43 + 64
+        const uint8_t* timestamp_ptr = buffer + 35; /* 3 + 32 */
+        const uint8_t* signature = buffer + 43;     /* 35 + 8 */
+        const uint8_t* port_ptr = buffer + 107;     /* 43 + 64 */
         
-        // Prevent reflection (ignore own beacon)
+        /* Prevent reflection (ignore own beacon) */
         if (std::memcmp(ik_pub, identity_public_key_, 32) == 0) continue;
         
-        // Verify Timestamp (±60s)
+        /* Verify Timestamp (±60s) */
         uint64_t ts = 0;
         for (int i = 0; i < 8; ++i) {
             ts = (ts << 8) | timestamp_ptr[i];
@@ -560,11 +562,11 @@ void MeshNode::handle_discovery() {
         
         int64_t diff = static_cast<int64_t>(now_sec) - static_cast<int64_t>(ts);
         if (std::abs(diff) > 60) {
-             // gossip::logging::warn("Rejected beacon: timestamp out of bounds");
+             /* gossip::logging::warn("Rejected beacon: timestamp out of bounds"); */
              continue;
         }
         
-        // Verify Signature
+        /* Verify Signature */
         if (identity_) {
              if (!Identity::verify(ik_pub, buffer, 43, signature)) {
                  gossip::logging::warn("Rejected beacon: invalid signature");
@@ -572,13 +574,13 @@ void MeshNode::handle_discovery() {
              }
         }
         
-        // Extract Port
+        /* Extract Port */
         uint16_t peer_port = (static_cast<uint16_t>(port_ptr[0]) << 8) | static_cast<uint16_t>(port_ptr[1]);
         
         char addr_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &sender_addr.sin_addr, addr_str, sizeof(addr_str));
         
-        // Connect logic
+        /* Connect logic */
         if (std::memcmp(identity_public_key_, ik_pub, 32) > 0) {
              connect_to_peer(addr_str, peer_port);
         }
@@ -624,4 +626,4 @@ void MeshNode::cleanup_old_sequences() {
 
 
 
-}  // namespace gossip
+}  /* namespace gossip */

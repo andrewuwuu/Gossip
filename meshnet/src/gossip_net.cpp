@@ -12,7 +12,7 @@
 #include <queue>
 
 
-static std::shared_ptr<gossip::MeshNode> g_node; // Global shared_ptr is fine if mutex protects it
+static std::shared_ptr<gossip::MeshNode> g_node;  /* Global shared_ptr is fine if mutex protects it */
 
 /* 
  * Use leaky singleton pattern for synchronization primitives 
@@ -97,13 +97,15 @@ void gossip_destroy(void) {
     {
         std::lock_guard<std::mutex> lock(g_node_mutex());
         node = g_node;
-        g_node.reset(); // Clear global pointer
+        g_node.reset(); /* Clear global pointer */
     }
     
     if (node) {
         node->stop();
-        // node goes out of scope here, reducing refcount. 
-        // If 'gossip_poll_event' holds a copy, the object survives until that function returns.
+        /*
+         * node goes out of scope here, reducing refcount. 
+         * If 'gossip_poll_event' holds a copy, the object survives until that function returns.
+         */
     }
     g_callback_set = false;
     std::lock_guard<std::mutex> lock(g_event_queue_mutex());
@@ -208,7 +210,7 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
     std::lock_guard<std::mutex> lock(g_event_queue_mutex());
     if (g_pending_events().empty()) {
         std::memset(event, 0, sizeof(GossipEvent));
-        return 0; // No events
+        return 0; /* No events */
     }
     
     const auto& e = g_pending_events().front();
@@ -238,7 +240,7 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
     }
     
     g_pending_events().pop();
-    return 1; // 1 event returned
+    return 1; /* 1 event returned */
 }
 
 uint16_t gossip_get_node_id(void) {
@@ -472,7 +474,6 @@ int gossip_set_private_key(const uint8_t* private_key) {
     
     /*
      * Generate a new keypair since Identity::generate() is the clean way.
-     * TODO: Add Identity::set_secret_key() for direct key setting.
      */
     g_identity->generate();
     

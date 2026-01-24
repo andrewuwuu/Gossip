@@ -95,7 +95,7 @@ bool Connection::send(const Packet& packet) {
                 FRAME_FLAG_NONE,
                 encrypted_payload)) {
             gossip::logging::error("Encryption failed");
-            close(); // Close connection on critical encryption failure (e.g. key exhaustion)
+            close(); /* Close connection on critical encryption failure (e.g. key exhaustion) */
             return false;
         }
         
@@ -204,6 +204,9 @@ bool Connection::try_parse_packet() {
     /*
      * Protocol v1.0 Detection: Start with "GR" (0x47 0x52)
      */
+    /*
+     * Protocol v1.0 Detection: Start with "GR" (0x47 0x52)
+     */
     if (magic0 == protocol::FRAME_MAGIC_0 && magic1 == protocol::FRAME_MAGIC_1) {
         if (recv_buffer_.size() < protocol::FRAME_HEADER_SIZE) {
             return false;
@@ -213,6 +216,13 @@ bool Connection::try_parse_packet() {
         std::memcpy(&header, recv_buffer_.data(), protocol::FRAME_HEADER_SIZE);
         header.to_host_order();
         
+        // Sanity check length to avoid huge allocations/waiting
+        if (header.length > protocol::FRAME_MAX_PAYLOAD + crypto::TAG_SIZE) {
+             gossip::logging::error("Invalid frame length: " + std::to_string(header.length));
+             close();
+             return false;
+        }
+
         size_t total_size = protocol::FRAME_HEADER_SIZE + header.length;
         if (recv_buffer_.size() < total_size) {
             return false; /* Wait for more data */
@@ -227,9 +237,10 @@ bool Connection::try_parse_packet() {
                     
                     /* If we are responder (or simultaneous open resolved to responder), send our HELLO now if not sent */
                     if (handshake_->state() == HandshakeState::HELLO_RECEIVED) {
-                         // If we haven't sent HELLO yet (normal responder case)
-                         // But wait, create_hello() checks state.
-                         // If we are responder, we need to send HELLO now.
+                         /*
+                          * If we haven't sent HELLO yet (normal responder case)
+                          * create_hello() checks state internally.
+                          */
                          auto hello = handshake_->create_hello(false);
                          auto frame = FrameV1::create_hello_frame(hello.data(), hello.size());
                          send_raw(frame.data(), frame.size());
@@ -242,7 +253,6 @@ bool Connection::try_parse_packet() {
                         std::vector<uint8_t> auth_frame;
                         
                         /* Encrypt AUTH with K_init/K_resp and explicit seq=0 */
-                        /* Note: create_auth() returns payload. We need to encrypt it. */
                         if (FrameV1::encrypt_with_seq(
                                 handshake_->send_key(),
                                 protocol::MessageType::AUTH,
@@ -285,7 +295,7 @@ bool Connection::try_parse_packet() {
                         
                         gossip::logging::info("Handshake complete! Authenticated peer.");
                         
-                        // Set Node ID from handshake (First 2 bytes of PubKey is simplistic but matches legacy uint16)
+                        /* Set Node ID from handshake (First 2 bytes of PubKey is simplistic but matches legacy uint16) */
                         uint16_t peer_id = (static_cast<uint16_t>(peer_pubkey[0]) << 8) | static_cast<uint16_t>(peer_pubkey[1]);
                         node_id_ = peer_id;
 
@@ -326,15 +336,12 @@ bool Connection::try_parse_packet() {
                  if (type == protocol::MessageType::MSG) {
                      /* Convert to legacy Packet for callback compatibility */
                      /* MessagePayload format: DestID(2) | Len(1) | User | Msg */
-                     /* This is raw payload. Packet() constructor expects legacy header? */
-                     /* We need to fabricate a Packet object */
                      
-                     // TODO: Clean up this legacy bridge
                      Packet packet; 
                      packet.header().magic = MAGIC_BYTE;
                      packet.header().version = PROTOCOL_VERSION;
                      packet.header().type = static_cast<uint8_t>(PacketType::MSG);
-                     packet.header().source_id = node_id_; // We might not know source ID yet?
+                     packet.header().source_id = node_id_; /* We might not know source ID yet? */
                      packet.set_payload(decrypted);
                      
                      if (packet_callback_) packet_callback_(packet);
@@ -347,9 +354,11 @@ bool Connection::try_parse_packet() {
     }
 
     /*
-     * Legacy Protocol (v0.1) is no longer supported.
-     * Use v1.0 Handshake.
+     * Invalid magic bytes or legacy protocol.
+     * We strictly require v1.0 (GR) magic.
      */
+    gossip::logging::error("Invalid magic bytes (legacy?): " + std::to_string(magic0) + " " + std::to_string(magic1));
+    close();
     return false;
 }
 
@@ -755,4 +764,4 @@ bool ConnectionManager::set_nonblocking(int fd) {
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) >= 0;
 }
 
-}  // namespace gossip
+}  /* namespace gossip */
