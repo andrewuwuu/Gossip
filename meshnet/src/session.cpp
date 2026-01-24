@@ -35,6 +35,13 @@ Session::Session(const uint8_t* send_key, const uint8_t* recv_key, bool is_initi
     : mode_(SessionMode::HANDSHAKE)
     , is_initiator_(is_initiator)
 {
+    /* 
+     * In v1.0, the AUTH message uses sequence 0. 
+     * Subsequent application messages (MSG, PING) must start at 1.
+     */
+    send_seq_.store(1);
+    recv_seq_.store(1);
+
     if (send_key != nullptr) {
         std::memcpy(send_key_, send_key, crypto::KEY_SIZE);
     } else {

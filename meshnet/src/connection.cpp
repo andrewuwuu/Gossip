@@ -366,11 +366,15 @@ bool Connection::try_parse_packet() {
                      packet.header().magic = MAGIC_BYTE;
                      packet.header().version = PROTOCOL_VERSION;
                      packet.header().type = static_cast<uint8_t>(PacketType::MSG);
-                     packet.header().source_id = node_id_; /* We might not know source ID yet? */
+                     packet.header().source_id = node_id_;
                      packet.set_payload(decrypted);
                      
                      if (packet_callback_) packet_callback_(packet);
                  }
+            } else {
+                gossip::logging::error("Application data decryption failed (seq mismatch?). Closing session.");
+                close();
+                return false;
             }
         }
         
