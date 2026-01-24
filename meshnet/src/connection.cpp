@@ -63,9 +63,10 @@ void Connection::start_handshake(const Identity& identity, bool is_initiator) {
     handshake_start_ = std::chrono::steady_clock::now();
     
     if (is_initiator) {
-        gossip::logging::debug("Starting handshake as INITIATOR");
+        // gossip::logging::debug("Starting handshake as INITIATOR");
         auto hello = handshake_->create_hello(true);
         auto frame = FrameV1::create_hello_frame(hello.data(), hello.size());
+        gossip::logging::debug("Sending HELLO frame, size=" + std::to_string(frame.size()));
         send_raw(frame.data(), frame.size());
     } else {
         gossip::logging::debug("Expecting handshake as RESPONDER");
@@ -137,8 +138,8 @@ bool Connection::send_raw(const uint8_t* data, size_t len) {
         }
         sent += n;
     }
-    // gossip::logging::debug("Sent " + std::to_string(len) + " bytes");
     
+    gossip::logging::debug("Sent " + std::to_string(len) + " bytes");
     return true;
 }
 
@@ -745,7 +746,11 @@ void ConnectionManager::accept_connections() {
         epoll_event ev{};
         ev.events = EPOLLIN; /* Level Triggered for safety */
         ev.data.fd = client_fd;
-        epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &ev);
+        if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &ev) < 0) {
+            gossip::logging::error("Failed to add client to epoll: " + std::string(strerror(errno)));
+            ::close(client_fd);
+            continue;
+        }
         
         {
             std::lock_guard<std::mutex> lock(connections_mutex_);
