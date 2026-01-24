@@ -184,6 +184,15 @@ public:
      */
     const uint8_t* ephemeral_public_key() const { return ephemeral_public_; }
 
+    /*
+     * Checks if we need to send a HELLO response.
+     * Returns true if we are RESPONDER and haven't recorded our HELLO yet.
+     * Used to prevent duplicate HELLO transmission during simultaneous open.
+     */
+    bool needs_hello_response() const {
+        return role_ == protocol::HandshakeRole::RESPONDER && hello_resp_.empty();
+    }
+
 private:
     const Identity& identity_;
     HandshakeState state_;

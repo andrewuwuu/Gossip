@@ -260,13 +260,11 @@ bool Connection::try_parse_packet() {
                     
                     /* If we are responder (or simultaneous open resolved to responder), send our HELLO now if not sent */
                     if (handshake_->state() == HandshakeState::HELLO_RECEIVED) {
-                         /*
-                          * If we haven't sent HELLO yet (normal responder case)
-                          * create_hello() checks state internally.
-                          */
-                         auto hello = handshake_->create_hello(false);
-                         auto frame = FrameV1::create_hello_frame(hello.data(), hello.size());
-                         send_raw(frame.data(), frame.size());
+                         if (handshake_->needs_hello_response()) {
+                             auto hello = handshake_->create_hello(false);
+                             auto frame = FrameV1::create_hello_frame(hello.data(), hello.size());
+                             send_raw(frame.data(), frame.size());
+                         }
                     }
                     
                     if (handshake_->derive_keys()) {
