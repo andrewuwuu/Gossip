@@ -6,6 +6,8 @@
  */
 
 #include "frame.h"
+#include "logging.h"
+#include <cstdio>
 #include <cstring>
 #include <arpa/inet.h>
 
@@ -372,6 +374,19 @@ bool FrameV1::decrypt_with_key(
     crypto::secure_zero(nonce, sizeof(nonce));
     
     if (!result) {
+        char debug_buf[512];
+        std::snprintf(debug_buf, sizeof(debug_buf),
+            "AUTH Decrypt Fail details:\n"
+            "  Key[0-3]: %02x%02x%02x%02x\n"
+            "  Nonce: %02x%02x%02x%02x...\n"
+            "  AAD(MagVerTypLen): %02x%02x %02x %02x %02x%02x%02x%02x\n"
+            "  Tag(Last16): %02x%02x...%02x%02x",
+            key[0], key[1], key[2], key[3],
+            nonce[0], nonce[1], nonce[2], nonce[3],
+            frame[0], frame[1], frame[2], frame[3], frame[4], frame[5], frame[6], frame[7],
+            frame[frame_len-16], frame[frame_len-15], frame[frame_len-2], frame[frame_len-1]
+        );
+        gossip::logging::error(debug_buf);
         return false;
     }
     
