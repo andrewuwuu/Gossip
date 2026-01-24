@@ -241,6 +241,28 @@ func (c *CLI) handleEvent(event meshnet.Event) {
 		c.printPrompt()
 
 	case meshnet.EventMessageReceived:
+		/*
+		 * Parse the binary payload: [DestID(2) | NameLen(1) | Username | Msg]
+		 */
+		data := event.Data
+		if len(data) >= 3 {
+			// Skip DestID (2 bytes)
+			nameLen := int(data[2])
+			if len(data) >= 3+nameLen {
+				// We don't strictly need to extract username here if event.Username is correct,
+				// but let's trust the payload if valid.
+				payloadUsername := string(data[3 : 3+nameLen])
+
+				// Extract Message
+				messageContent := string(data[3+nameLen:])
+
+				// Use parsed username and message content
+				c.handler.HandleIncoming(event.PeerID, payloadUsername, []byte(messageContent))
+				return
+			}
+		}
+
+		// Fallback: treat as raw text if parsing fails (legacy compatibility?)
 		c.handler.HandleIncoming(event.PeerID, event.Username, event.Data)
 
 	case meshnet.EventError:
