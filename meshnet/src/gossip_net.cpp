@@ -324,7 +324,7 @@ int gossip_load_identity(const char* path) {
      * Propagate identity to MeshNode if it exists
      */
     if (g_node) {
-        g_node->set_identity(g_identity->public_key(), g_identity->private_key());
+        g_node->set_identity(g_identity->public_key(), g_identity->secret_key());
     }
     
     gossip::logging::info("Identity loaded from " + std::string(path));
@@ -360,7 +360,7 @@ int gossip_set_private_key(const uint8_t* private_key) {
     
     /*
      * Generate a new keypair since Identity::generate() is the clean way.
-     * TODO: Add Identity::set_private_key() for direct key setting.
+     * TODO: Add Identity::set_secret_key() for direct key setting.
      */
     g_identity->generate();
     
@@ -368,7 +368,7 @@ int gossip_set_private_key(const uint8_t* private_key) {
      * Propagate identity to MeshNode if it exists
      */
     if (g_node) {
-        g_node->set_identity(g_identity->public_key(), g_identity->private_key());
+        g_node->set_identity(g_identity->public_key(), g_identity->secret_key());
     }
     
     gossip::logging::info("Identity generated");

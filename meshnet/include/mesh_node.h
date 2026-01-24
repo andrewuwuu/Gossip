@@ -16,6 +16,8 @@
 #include "packet.h"
 #include "connection.h"
 #include "session.h"
+#include "trust_store.h"
+#include "identity.h"
 
 namespace gossip {
 
@@ -93,11 +95,11 @@ public:
     void set_session(std::shared_ptr<Session> session);
     
     /*
-     * Sets the node's identity for PKI-based key exchange.
+     * Sets the node's Ed25519 identity for v1.0 handshake.
      * When identity is set, session keys are derived per-connection
-     * using X25519 Diffie-Hellman.
+     * using ephemeral X25519 Diffie-Hellman.
      */
-    void set_identity(const uint8_t* public_key, const uint8_t* private_key);
+    void set_identity(const uint8_t* public_key, const uint8_t* secret_key);
     
     /*
      * Returns the node's public key (if identity is set).
@@ -128,11 +130,14 @@ private:
     std::shared_ptr<Session> session_;  /* deprecated: global PSK session */
     
     /*
-     * PKI identity (X25519 keypair)
+     * Ed25519 identity (public key = NodeID, secret key = 64 bytes)
      */
     bool has_identity_ = false;
     uint8_t identity_public_key_[32];
-    uint8_t identity_private_key_[32];
+    uint8_t identity_secret_key_[64];
+    
+    std::unique_ptr<Identity> identity_;
+    std::unique_ptr<TrustStore> trust_store_;
     
     mutable std::mutex peers_mutex_;
     std::unordered_map<uint16_t, PeerInfo> peers_;

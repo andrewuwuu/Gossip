@@ -10,11 +10,12 @@ Gossip uses a hybrid architecture:
 
 ## Features
 
-- [x] **Automatic Peer Discovery**: Uses UDP broadcasting to find other nodes on the local network.
+- [x] **Automatic Peer Discovery**: Uses UDP broadcasting (Signed Beacons) to find other nodes on the local network.
 - [x] **Mesh Routing**: Nodes automatically forward messages to reach peers not in direct range.
-- [x] **Reliable Transport**: TCP-based connections with custom packet framing and heartbeat.
+- [x] **Reliable Transport**: TCP-based connections with custom v1.0 packet framing and heartbeat.
 - [x] **Cross-Platform Support**: Optimized for Linux (WSL2), Linux (Native), and Android (Termux).
-- [x] **Encryption**: XChaCha20-Poly1305 AEAD encryption with replay protection (Gossip Protocol v0.1).
+- [x] **Secure Handshake**: Ephemeral X25519 key exchange with HKDF-SHA256 session derivation (Gossip Protocol v1.0).
+- [x] **Identity Trust**: Ed25519 signatures and TOFU (Trust On First Use) identity pinning.
 
 ## Project Structure
 
@@ -65,21 +66,16 @@ USERNAME=anonymous
 # GOSSIP_SESSION_KEY=your_64_char_hex_key_here
 ```
 
-### Enabling Encryption
+### Identity & Encryption
 
-To enable encrypted messaging between peers:
+Gossip now uses a zero-configuration PKI system (Protocol v1.0).
 
-1. Generate a shared key:
-   ```bash
-   openssl rand -hex 32
-   ```
+1.  **Identity Generation**: The first time you run the app, it will generate a secure Ed25519 keypair.
+2.  **Public Key**: Your Node ID is derived from your public key.
+3.  **Trust**: When connecting to a peer for the first time, their public key is pinned. Subsequent connections MUST match this key or they will be rejected (TOFU).
+4.  **Encryption**: All sessions are encrypted with forward-secret XChaCha20-Poly1305 keys derived from an ephemeral X25519 handshake.
 
-2. Set the key on all peers (via `.env` or environment):
-   ```bash
-   export GOSSIP_SESSION_KEY=<your_64_char_hex_key>
-   ```
-
-All peers must use the same key to communicate. Without a key, messages are sent unencrypted.
+Manual key configuration (via `GOSSIP_SESSION_KEY`) is considered legacy and deprecated.
 
 ## Protocol Specification
 

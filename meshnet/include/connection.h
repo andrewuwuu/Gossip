@@ -13,6 +13,7 @@
 #include "packet.h"
 #include "session.h"
 #include "frame.h"
+#include "handshake.h"
 
 namespace gossip {
 
@@ -31,12 +32,16 @@ public:
     enum class State {
         DISCONNECTED,
         CONNECTING,
+        HANDSHAKING,
         CONNECTED,
         ERROR
     };
 
     using PacketCallback = std::function<void(const Packet&)>;
     using DisconnectCallback = std::function<void()>;
+    using TrustCallback = std::function<bool(const uint8_t* node_id, const uint8_t* public_key)>;
+    using HandshakeCompleteCallback = std::function<void(uint16_t peer_id)>;
+
 
     Connection(int socket_fd, const std::string& peer_addr, uint16_t peer_port);
     ~Connection();
@@ -60,6 +65,8 @@ public:
     
     void set_packet_callback(PacketCallback cb) { packet_callback_ = std::move(cb); }
     void set_disconnect_callback(DisconnectCallback cb) { disconnect_callback_ = std::move(cb); }
+    void set_trust_callback(TrustCallback cb) { trust_callback_ = std::move(cb); }
+    void set_handshake_complete_callback(HandshakeCompleteCallback cb) { handshake_complete_callback_ = std::move(cb); }
     
     /*
      * Reads available data from the socket into the receive buffer
@@ -84,6 +91,19 @@ public:
     void set_session(std::shared_ptr<Session> session) { session_ = std::move(session); }
     bool is_encrypted() const { return session_ != nullptr; }
 
+    /*
+     * Starts the v1.0 handshake process.
+     * @param identity  Node's identity for authentication
+     * @param is_initiator True if this node initiated the connection
+     */
+    void start_handshake(const Identity& identity, bool is_initiator);
+    
+    /*
+     * Checks if handshake has timed out.
+     * Returns true if timed out (and closes connection).
+     */
+    bool check_timeout();
+
     void close();
 
 private:
@@ -98,12 +118,21 @@ private:
     
     PacketCallback packet_callback_;
     DisconnectCallback disconnect_callback_;
+    TrustCallback trust_callback_;
+    HandshakeCompleteCallback handshake_complete_callback_;
     
     /*
      * Active cryptographic session (may be null).
      * If null, communication is plaintext.
      */
     std::shared_ptr<Session> session_;
+    
+    /*
+     * HS state for v1.0 handshake
+     */
+    std::unique_ptr<Handshake> handshake_;
+    std::chrono::steady_clock::time_point handshake_start_;
+    static constexpr std::chrono::seconds HANDSHAKE_TIMEOUT{5};
 
     bool try_parse_packet();
 };

@@ -1,7 +1,7 @@
 /*
  * identity.cpp
  *
- * Implementation of Identity class for keypair management.
+ * Implementation of Identity class for Ed25519 keypair management.
  */
 
 #include "identity.h"
@@ -74,15 +74,15 @@ bool ensure_directory(const std::string& path) {
 
 Identity::Identity() : valid_(false) {
     std::memset(public_key_, 0, sizeof(public_key_));
-    std::memset(private_key_, 0, sizeof(private_key_));
+    std::memset(secret_key_, 0, sizeof(secret_key_));
 }
 
 Identity::~Identity() {
-    crypto::secure_zero(private_key_, sizeof(private_key_));
+    crypto::secure_zero(secret_key_, sizeof(secret_key_));
 }
 
 void Identity::generate() {
-    crypto::generate_keypair(public_key_, private_key_);
+    crypto::ed25519_generate_keypair(public_key_, secret_key_);
     valid_ = true;
 }
 
@@ -103,14 +103,18 @@ bool Identity::load(const std::string& path) {
         hex_key.pop_back();
     }
     
-    if (!hex_to_bytes(hex_key, private_key_, crypto::PRIVATE_KEY_SIZE)) {
+    /*
+     * Ed25519 secret key is 64 bytes = 128 hex characters
+     */
+    if (!hex_to_bytes(hex_key, secret_key_, crypto::ED25519_SECRET_KEY_SIZE)) {
         return false;
     }
     
     /*
-     * Derive public key from private key
+     * The public key is embedded in the last 32 bytes of the Ed25519 secret key.
+     * This is a libsodium convention: secret_key = seed (32) || public_key (32)
      */
-    crypto::derive_public_key(public_key_, private_key_);
+    std::memcpy(public_key_, secret_key_ + 32, crypto::ED25519_PUBLIC_KEY_SIZE);
     valid_ = true;
     
     return true;
@@ -128,7 +132,7 @@ bool Identity::save(const std::string& path) const {
         return false;
     }
     
-    file << bytes_to_hex(private_key_, crypto::PRIVATE_KEY_SIZE) << std::endl;
+    file << bytes_to_hex(secret_key_, crypto::ED25519_SECRET_KEY_SIZE) << std::endl;
     file.close();
     
     /*
@@ -139,8 +143,32 @@ bool Identity::save(const std::string& path) const {
     return true;
 }
 
+void Identity::set_from_keys(const uint8_t* public_key, const uint8_t* secret_key) {
+    if (public_key && secret_key) {
+        std::memcpy(public_key_, public_key, crypto::ED25519_PUBLIC_KEY_SIZE);
+        std::memcpy(secret_key_, secret_key, crypto::ED25519_SECRET_KEY_SIZE);
+        valid_ = true;
+    }
+}
+
 std::string Identity::public_key_hex() const {
-    return bytes_to_hex(public_key_, crypto::PUBLIC_KEY_SIZE);
+    return bytes_to_hex(public_key_, crypto::ED25519_PUBLIC_KEY_SIZE);
+}
+
+bool Identity::sign(const uint8_t* data, size_t len, uint8_t* signature) const {
+    if (!valid_) {
+        return false;
+    }
+    return crypto::ed25519_sign(secret_key_, data, len, signature);
+}
+
+bool Identity::verify(
+    const uint8_t* public_key,
+    const uint8_t* data,
+    size_t len,
+    const uint8_t* signature
+) {
+    return crypto::ed25519_verify(public_key, data, len, signature);
 }
 
 std::string Identity::default_path() {

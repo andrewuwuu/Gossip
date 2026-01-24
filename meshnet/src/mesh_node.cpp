@@ -10,6 +10,7 @@
 #include <chrono>
 #include <algorithm>
 #include <iostream>
+#include "identity.h"
 
 namespace gossip {
 
@@ -61,12 +62,18 @@ void MeshNode::set_session(std::shared_ptr<Session> session) {
     }
 }
 
-void MeshNode::set_identity(const uint8_t* public_key, const uint8_t* private_key) {
-    if (public_key && private_key) {
+void MeshNode::set_identity(const uint8_t* public_key, const uint8_t* secret_key) {
+    if (public_key && secret_key) {
         std::memcpy(identity_public_key_, public_key, 32);
-        std::memcpy(identity_private_key_, private_key, 32);
+        std::memcpy(identity_secret_key_, secret_key, 64);
         has_identity_ = true;
-        gossip::logging::info("Identity configured for PKI key exchange");
+        
+        identity_ = std::make_unique<Identity>();
+        identity_->set_from_keys(public_key, secret_key);
+        
+        trust_store_ = std::make_unique<TrustStore>();
+        
+        gossip::logging::info("Identity configured for v1.0 handshake");
     }
 }
 
@@ -102,13 +109,41 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
             event.peer_id = conn->node_id();
             push_event(std::move(event));
         });
+        
         /*
-         * Send our ANNOUNCE to the new connection
-         * Payload format:
-         *   [port (2 bytes)] [public_key (32 bytes, optional)]
+         * Start v1.0 Handshake as Responder
          */
-        Packet announce = create_announce_packet();
-        conn->send(announce);
+        conn->set_trust_callback([this](const uint8_t* node_id, const uint8_t* pubkey) {
+            if (trust_store_) {
+                return !trust_store_->should_reject(pubkey, pubkey);
+            }
+            return true;
+        });
+        
+        conn->set_handshake_complete_callback([this, conn](uint16_t peer_id) {
+             gossip::logging::info("Handshake complete callback for peer " + std::to_string(peer_id));
+             
+             conn_manager_->register_connection(peer_id, conn);
+             
+             PeerInfo info;
+             info.node_id = peer_id;
+             info.address = conn->peer_addr();
+             info.port = conn->peer_port();
+             info.last_seen = current_time_ms();
+             info.hop_count = 1;
+             
+             {
+                 std::lock_guard<std::mutex> lock(peers_mutex_);
+                 peers_[info.node_id] = info;
+             }
+             
+             MeshEvent event;
+             event.type = MeshEvent::Type::PEER_CONNECTED;
+             event.peer_id = info.node_id;
+             push_event(std::move(event));
+        });
+        
+        conn->start_handshake(*identity_, false);
     });
 
     if (!conn_manager_->start()) {
@@ -183,10 +218,10 @@ bool MeshNode::send_message(uint16_t dest_id, const std::string& username,
     
     gossip::logging::debug("Sending message to node " + std::to_string(dest_id));
 
-    Packet packet(PacketType::MESSAGE, node_id_);
+    Packet packet(PacketType::MSG, node_id_);
     
     if (require_ack) {
-        packet.set_flag(FLAG_REQUIRE_ACK);
+        // Ack not supported in v1.0 spec table
     }
     
     MessagePayload payload;
@@ -213,7 +248,7 @@ bool MeshNode::broadcast_message(const std::string& username, const std::string&
 
     gossip::logging::debug("Broadcasting message");
     
-    Packet packet(PacketType::MESSAGE, node_id_, FLAG_BROADCAST);
+    Packet packet(PacketType::MSG, node_id_, FLAG_BROADCAST);
     
     MessagePayload payload;
     payload.dest_id = 0;  /* Broadcast */
@@ -270,10 +305,46 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
     });
     
     /*
-     * Send our ANNOUNCE
+     * Start v1.0 Handshake as Initiator
      */
-    Packet announce = create_announce_packet();
-    conn->send(announce);
+    if (identity_) {
+        conn->set_trust_callback([this](const uint8_t* node_id, const uint8_t* pubkey) {
+            if (trust_store_) {
+                return !trust_store_->should_reject(pubkey, pubkey);
+            }
+            return true;
+        });
+        
+        conn->set_handshake_complete_callback([this, conn](uint16_t peer_id) {
+             gossip::logging::info("Handshake complete callback for peer " + std::to_string(peer_id));
+             
+             {
+                 std::lock_guard<std::mutex> lock(pending_mutex_);
+                 pending_connections_.erase(conn->socket_fd());
+             }
+             
+             conn_manager_->register_connection(peer_id, conn);
+             
+             PeerInfo info;
+             info.node_id = peer_id;
+             info.address = conn->peer_addr();
+             info.port = conn->peer_port();
+             info.last_seen = current_time_ms();
+             info.hop_count = 1;
+             
+             {
+                 std::lock_guard<std::mutex> lock(peers_mutex_);
+                 peers_[info.node_id] = info;
+             }
+             
+             MeshEvent event;
+             event.type = MeshEvent::Type::PEER_CONNECTED;
+             event.peer_id = info.node_id;
+             push_event(std::move(event));
+        });
+        
+        conn->start_handshake(*identity_, true);
+    }
     
     return true;
 }
@@ -284,25 +355,69 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
  * Broadcasts a UDP DISCOVER packet to the local network.
  * Peers receiving this will respond with their info.
  */
+/*
+ * Implementation: discover_peers
+ * 
+ * Broadcasts a UDP BEACON packet to the local network.
+ * Format: [ Magic (2) | Version (1) | IK_pub (32) | Timestamp (8) | Signature (64) ] + [ Port (2) ]
+ */
 void MeshNode::discover_peers() {
-    if (!running_ || discovery_socket_ < 0) return;
-    gossip::logging::debug("Broadcasting discovery packet");
+    if (!running_ || discovery_socket_ < 0 || !has_identity_) return;
     
-    Packet discover(PacketType::DISCOVER, node_id_);
+    /* 
+     * Beacon framing constants 
+     */
+    constexpr uint8_t BEACON_MAGIC[2] = {0x47, 0x52}; // "GR"
+    constexpr uint8_t BEACON_VERSION = 0x01;
     
-    std::vector<uint8_t> payload;
-    payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
-    payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
-    discover.set_payload(payload);
+    std::vector<uint8_t> beacon;
+    beacon.reserve(109); // 2+1+32+8+64+2
     
-    auto data = discover.serialize();
+    // Magic (2)
+    beacon.push_back(BEACON_MAGIC[0]);
+    beacon.push_back(BEACON_MAGIC[1]);
+    
+    // Version (1)
+    beacon.push_back(BEACON_VERSION);
+    
+    // IK_pub (32)
+    beacon.insert(beacon.end(), identity_public_key_, identity_public_key_ + 32);
+    
+    // Timestamp (8, Big Endian Seconds)
+    uint64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+    
+    uint64_t now_be = htobe64(now_sec); // Requires endian.h or manual
+    // Portable manual BE encoding for uint64
+    for (int i = 7; i >= 0; --i) {
+        beacon.push_back(static_cast<uint8_t>((now_sec >> (i * 8)) & 0xFF));
+    }
+    
+    // Signature Input: Magic || Version || IK_pub || Timestamp
+    if (identity_) {
+        uint8_t signature[64];
+        if (identity_->sign(beacon.data(), beacon.size(), signature)) {
+            // Append Signature (64)
+            beacon.insert(beacon.end(), signature, signature + 64);
+        } else {
+             gossip::logging::error("Failed to sign discovery beacon");
+             return;
+        }
+    } else {
+        return; 
+    }
+    
+    // Append Listen Port (2, Big Endian) - Extension to spec to allow connection
+    beacon.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
+    beacon.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
     
     sockaddr_in broadcast_addr{};
     broadcast_addr.sin_family = AF_INET;
     broadcast_addr.sin_addr.s_addr = INADDR_BROADCAST;
     broadcast_addr.sin_port = htons(discovery_port_);
     
-    sendto(discovery_socket_, data.data(), data.size(), 0,
+    sendto(discovery_socket_, beacon.data(), beacon.size(), 0,
            reinterpret_cast<sockaddr*>(&broadcast_addr), sizeof(broadcast_addr));
 }
 
@@ -356,13 +471,11 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
     // gossip::logging::debug("Got packet type from " + std::to_string(from_id));
     
     switch (packet.type()) {
-        case PacketType::PING: {
-            Packet pong(PacketType::PONG, node_id_);
-            conn->send(pong);
-            break;
-        }
-        
-        case PacketType::PONG: {
+       case PacketType::PING: {
+            /* 
+             * Update last_seen on PING (Heartbeat).
+             * v1.0 Spec doesn't define explicit PONG, so we just track liveness.
+             */
             std::lock_guard<std::mutex> lock(peers_mutex_);
             auto it = peers_.find(from_id);
             if (it != peers_.end()) {
@@ -371,74 +484,8 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
             break;
         }
         
-        case PacketType::ANNOUNCE: {
-            gossip::logging::debug("Received ANNOUNCE from " + std::to_string(from_id));
-            if (packet.payload().size() >= 2) {
-                /*
-                 * Manual Big Endian deserialization
-                 */
-                const uint8_t* data = packet.payload().data();
-                uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
-                
-                /*
-                 * PKI Key Exchange: If payload includes public key (34 bytes)
-                 * and we have an identity, derive per-connection session key.
-                 */
-                if (has_identity_ && packet.payload().size() >= 34) {
-                    const uint8_t* peer_pubkey = data + 2;
-                    
-                    uint8_t shared_secret[32];
-                    if (crypto::derive_shared_secret(shared_secret, identity_private_key_, peer_pubkey)) {
-                        /*
-                         * Create per-connection session with derived key
-                         */
-                        auto derived_session = std::make_shared<Session>(shared_secret);
-                        conn->set_session(derived_session);
-                        
-                        gossip::logging::info("PKI: Derived session key for peer " + std::to_string(from_id));
-                        
-                        crypto::secure_zero(shared_secret, sizeof(shared_secret));
-                    } else {
-                        gossip::logging::warn("PKI: Failed to derive shared secret for peer " + std::to_string(from_id));
-                    }
-                }
-                
-                /*
-                 * Register this connection with the node ID
-                 */
-                conn->set_node_id(from_id);
-                conn_manager_->register_connection(from_id, conn);
-                
-                /*
-                 * Remove from pending if it was there
-                 */
-                {
-                    std::lock_guard<std::mutex> lock(pending_mutex_);
-                    pending_connections_.erase(conn->socket_fd());
-                }
-                
-                PeerInfo info;
-                info.node_id = from_id;
-                info.address = conn->peer_addr();
-                info.port = peer_port;
-                info.last_seen = current_time_ms();
-                info.hop_count = 1;
-                
-                {
-                    std::lock_guard<std::mutex> lock(peers_mutex_);
-                    peers_[info.node_id] = info;
-                }
-                
-                MeshEvent event;
-                event.type = MeshEvent::Type::PEER_CONNECTED;
-                event.peer_id = info.node_id;
-                push_event(std::move(event));
-            }
-            break;
-        }
-        
-        case PacketType::MESSAGE: {
-            gossip::logging::debug("Received MESSAGE from " + std::to_string(from_id));
+        case PacketType::MSG: {
+            // gossip::logging::debug("Received MSG from " + std::to_string(from_id));
             MessagePayload msg;
             if (MessagePayload::deserialize(
                     packet.payload().data(), packet.payload().size(), msg)) {
@@ -450,16 +497,6 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
                     event.username = msg.username;
                     event.data.assign(msg.message.begin(), msg.message.end());
                     push_event(std::move(event));
-                    
-                    if (packet.has_flag(FLAG_REQUIRE_ACK)) {
-                        Packet ack(PacketType::MESSAGE_ACK, node_id_);
-                        std::vector<uint8_t> ack_payload;
-                        uint32_t net_seq = htonl(packet.sequence());
-                        ack_payload.resize(4);
-                        std::memcpy(ack_payload.data(), &net_seq, 4);
-                        ack.set_payload(ack_payload);
-                        conn->send(ack);
-                    }
                 }
                 
                 if (packet.has_flag(FLAG_BROADCAST) && msg.dest_id == 0) {
@@ -469,27 +506,15 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& pac
             break;
         }
         
-        case PacketType::MESSAGE_ACK: {
-            MeshEvent event;
-            event.type = MeshEvent::Type::MESSAGE_ACK;
-            event.peer_id = from_id;
-            push_event(std::move(event));
-            break;
-        }
-        
-        case PacketType::FORWARD: {
-            Packet inner;
-            if (Packet::deserialize(packet.payload().data(), packet.payload().size(), inner)) {
-                handle_packet(conn, inner);
-            }
-            break;
-        }
-        
         default:
             break;
     }
 }
 
+/*
+ * Implementation: handle_discovery
+ * Handles incoming v1.0 UDP Beacons.
+ */
 void MeshNode::handle_discovery() {
     if (discovery_socket_ < 0) return;
     
@@ -505,88 +530,66 @@ void MeshNode::handle_discovery() {
             break;
         }
         
-        Packet packet;
-        if (!Packet::deserialize(buffer, n, packet)) {
-            continue;
+        // Expected size: 109 bytes (107 beacon + 2 port)
+        if (n < 109) continue;
+        
+        // Verify Magic (GR)
+        if (buffer[0] != 0x47 || buffer[1] != 0x52) continue;
+        
+        // Verify Version (1)
+        if (buffer[2] != 0x01) continue;
+        
+        // Extract fields
+        const uint8_t* ik_pub = buffer + 3;
+        const uint8_t* timestamp_ptr = buffer + 35; // 3 + 32
+        const uint8_t* signature = buffer + 43;     // 35 + 8
+        const uint8_t* port_ptr = buffer + 107;     // 43 + 64
+        
+        // Prevent reflection (ignore own beacon)
+        if (std::memcmp(ik_pub, identity_public_key_, 32) == 0) continue;
+        
+        // Verify Timestamp (±60s)
+        uint64_t ts = 0;
+        for (int i = 0; i < 8; ++i) {
+            ts = (ts << 8) | timestamp_ptr[i];
         }
         
-        if (packet.source_id() == node_id_) {
-            continue;
+        uint64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+        
+        int64_t diff = static_cast<int64_t>(now_sec) - static_cast<int64_t>(ts);
+        if (std::abs(diff) > 60) {
+             // gossip::logging::warn("Rejected beacon: timestamp out of bounds");
+             continue;
         }
+        
+        // Verify Signature
+        if (identity_) {
+             if (!Identity::verify(ik_pub, buffer, 43, signature)) {
+                 gossip::logging::warn("Rejected beacon: invalid signature");
+                 continue;
+             }
+        }
+        
+        // Extract Port
+        uint16_t peer_port = (static_cast<uint16_t>(port_ptr[0]) << 8) | static_cast<uint16_t>(port_ptr[1]);
         
         char addr_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &sender_addr.sin_addr, addr_str, sizeof(addr_str));
         
-        if (packet.type() == PacketType::DISCOVER) {
-            gossip::logging::debug(
-                "Got DISCOVER from " + std::to_string(packet.source_id()) + " at " + addr_str);
-            send_announce(addr_str, ntohs(sender_addr.sin_port));
-            
-            if (packet.payload().size() >= 2) {
-                const uint8_t* data = packet.payload().data();
-                uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
-                
-                /*
-                 * Tie-breaker: only connect if our node_id > their node_id
-                 * This prevents BOTH nodes from connecting to each other simultaneously
-                 */
-                if (node_id_ > packet.source_id()) {
-                    connect_to_peer(addr_str, peer_port);
-                }
-            }
-        } else if (packet.type() == PacketType::ANNOUNCE) {
-            gossip::logging::debug(
-                "Got UDP ANNOUNCE from " + std::to_string(packet.source_id()) + " at " + addr_str);
-            if (packet.payload().size() >= 2) {
-                const uint8_t* data = packet.payload().data();
-                uint16_t peer_port = (static_cast<uint16_t>(data[0]) << 8) | static_cast<uint16_t>(data[1]);
-                
-                /*
-                 * Logic for establishing TCP connection if not already present
-                 * Tie-breaker: only connect if our node_id > their node_id
-                 */
-                bool should_connect = false;
-                {
-                    std::lock_guard<std::mutex> lock(peers_mutex_);
-                    if (peers_.find(packet.source_id()) == peers_.end()) {
-                        if (node_id_ > packet.source_id()) {
-                            should_connect = true;
-                        }
-                    }
-                }
-                
-                if (should_connect) {
-                    connect_to_peer(addr_str, peer_port);
-                }
-            }
+        // Connect logic
+        if (std::memcmp(identity_public_key_, ik_pub, 32) > 0) {
+             connect_to_peer(addr_str, peer_port);
         }
     }
 }
 
-void MeshNode::send_announce(const std::string& to_addr, uint16_t to_port) {
-    if (discovery_socket_ < 0) return;
-    
-    Packet announce = create_announce_packet();
-    auto data = announce.serialize();
-    
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    inet_pton(AF_INET, to_addr.c_str(), &addr.sin_addr);
-    addr.sin_port = htons(to_port);
-    
-    sendto(discovery_socket_, data.data(), data.size(), 0,
-           reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-}
+
 
 void MeshNode::forward_packet(const Packet& packet, uint16_t exclude_peer) {
-    Packet forward(PacketType::FORWARD, node_id_);
-    auto serialized = packet.serialize();
-    forward.set_payload(serialized);
-    
-    /*
-     * Broadcast to all peers except the one we got it from
-     */
-    conn_manager_->broadcast(forward, exclude_peer);
+    // Directly broadcast the packet to all other peers
+    conn_manager_->broadcast(packet, exclude_peer);
 }
 
 void MeshNode::push_event(MeshEvent event) {
@@ -619,21 +622,6 @@ void MeshNode::cleanup_old_sequences() {
     }
 }
 
-Packet MeshNode::create_announce_packet() const {
-    Packet announce(PacketType::ANNOUNCE, node_id_);
-    std::vector<uint8_t> payload;
-    
-    /* Port (2 bytes, big endian) */
-    payload.push_back(static_cast<uint8_t>((listen_port_ >> 8) & 0xFF));
-    payload.push_back(static_cast<uint8_t>(listen_port_ & 0xFF));
-    
-    /* Public Key (32 bytes) if identity set */
-    if (has_identity_) {
-        payload.insert(payload.end(), identity_public_key_, identity_public_key_ + 32);
-    }
-    
-    announce.set_payload(payload);
-    return announce;
-}
+
 
 }  // namespace gossip

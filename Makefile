@@ -17,6 +17,14 @@ run: build
 	@echo "Starting application..."
 	@LD_LIBRARY_PATH=./meshnet/build ./gossip
 
+run-tui: build
+	@echo "Starting application (TUI mode)..."
+	@# Assuming TUI is default or flag needed. Based on code, TUI starts if not disabled.
+	@# Actually, CLI.Run() starts TUI if c.ui != nil. NewCLI initializes TUI.
+	@# So standard run should show TUI unless flags change behavior.
+	@# But user asked for specific target.
+	@LD_LIBRARY_PATH=./meshnet/build ./gossip
+
 clean:
 	@echo "Cleaning..."
 	@rm -rf meshnet/build

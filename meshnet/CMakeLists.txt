@@ -31,6 +31,8 @@ set(SOURCES
     src/session.cpp
     src/frame.cpp
     src/identity.cpp
+    src/handshake.cpp
+    src/trust_store.cpp
 )
 
 set(HEADERS
@@ -43,6 +45,9 @@ set(HEADERS
     include/session.h
     include/frame.h
     include/identity.h
+    include/protocol.h
+    include/handshake.h
+    include/trust_store.h
 )
 
 add_library(gossipnet SHARED ${SOURCES} ${HEADERS})
@@ -120,5 +125,9 @@ if(BUILD_TESTS)
     add_executable(test_session tests/test_session.cpp)
     target_link_libraries(test_session gossipnet_static GTest::gtest_main)
     add_test(NAME SessionTests COMMAND test_session)
+    
+    add_executable(test_handshake tests/test_handshake.cpp)
+    target_link_libraries(test_handshake gossipnet_static GTest::gtest_main)
+    add_test(NAME HandshakeTests COMMAND test_handshake)
 endif()
 

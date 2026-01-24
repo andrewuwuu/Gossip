@@ -1,8 +1,13 @@
 /*
  * crypto.h
  *
- * Cryptographic primitives for the Gossip Protocol v0.1.
- * Provides AEAD encryption using XChaCha20-Poly1305 and secure random number generation.
+ * Cryptographic primitives for the Gossip Protocol v1.0.
+ * Provides:
+ * - AEAD encryption (XChaCha20-Poly1305)
+ * - Key exchange (X25519)
+ * - Signatures (Ed25519)
+ * - Key derivation (HKDF-SHA256)
+ * - Hashing (SHA-256)
  *
  * All functions in this module are designed to:
  * - Be constant-time where security-relevant
@@ -16,16 +21,18 @@
 #include <cstdint>
 #include <cstddef>
 #include <vector>
+#include <utility>
 
 namespace gossip {
 namespace crypto {
 
 /*
- * Cryptographic constants matching Gossip Protocol v0.1 specification.
+ * Cryptographic constants matching Gossip Protocol v1.0 specification.
  */
 constexpr size_t KEY_SIZE = 32;       /* 256-bit symmetric key */
 constexpr size_t NONCE_SIZE = 24;     /* XChaCha20 extended nonce */
 constexpr size_t TAG_SIZE = 16;       /* Poly1305 authentication tag */
+constexpr size_t HASH_SIZE = 32;      /* SHA-256 output */
 
 /*
  * Initializes the cryptographic subsystem.
@@ -151,6 +158,139 @@ bool derive_shared_secret(
     uint8_t* shared_secret,
     const uint8_t* my_private,
     const uint8_t* their_public
+);
+
+/*
+ * =============================================================================
+ * Ed25519 Signature Functions (Gossip Protocol v1.0)
+ * =============================================================================
+ */
+constexpr size_t ED25519_PUBLIC_KEY_SIZE = 32;   /* Ed25519 public key */
+constexpr size_t ED25519_SECRET_KEY_SIZE = 64;   /* Ed25519 secret key */
+constexpr size_t ED25519_SIGNATURE_SIZE = 64;    /* Ed25519 signature */
+
+/*
+ * Generates a new Ed25519 keypair for node identity.
+ *
+ * @param public_key   Output buffer for 32-byte public key
+ * @param secret_key   Output buffer for 64-byte secret key
+ */
+void ed25519_generate_keypair(uint8_t* public_key, uint8_t* secret_key);
+
+/*
+ * Signs a message using Ed25519.
+ *
+ * @param secret_key  64-byte Ed25519 secret key
+ * @param message     Data to sign
+ * @param message_len Length of message
+ * @param signature   Output buffer for 64-byte signature
+ *
+ * @return true on success
+ */
+bool ed25519_sign(
+    const uint8_t* secret_key,
+    const uint8_t* message,
+    size_t message_len,
+    uint8_t* signature
+);
+
+/*
+ * Verifies an Ed25519 signature.
+ *
+ * @param public_key  32-byte Ed25519 public key
+ * @param message     Signed data
+ * @param message_len Length of message
+ * @param signature   64-byte signature to verify
+ *
+ * @return true if signature is valid, false otherwise
+ */
+bool ed25519_verify(
+    const uint8_t* public_key,
+    const uint8_t* message,
+    size_t message_len,
+    const uint8_t* signature
+);
+
+/*
+ * =============================================================================
+ * SHA-256 Hash Functions (Gossip Protocol v1.0)
+ * =============================================================================
+ */
+
+/*
+ * Computes SHA-256 hash of input data.
+ *
+ * @param data  Input data to hash
+ * @param len   Length of input data
+ * @param hash  Output buffer for 32-byte hash
+ */
+void sha256(const uint8_t* data, size_t len, uint8_t* hash);
+
+/*
+ * Computes SHA-256 hash of multiple data segments.
+ * Used for handshake transcript hashing.
+ *
+ * @param parts  Vector of (data pointer, length) pairs
+ * @param hash   Output buffer for 32-byte hash
+ */
+void sha256_multi(
+    const std::vector<std::pair<const uint8_t*, size_t>>& parts,
+    uint8_t* hash
+);
+
+/*
+ * =============================================================================
+ * HKDF-SHA256 Key Derivation (Gossip Protocol v1.0)
+ * =============================================================================
+ */
+
+/*
+ * HKDF-Extract: Derives a pseudorandom key from input keying material.
+ * PRK = HMAC-SHA256(salt, IKM)
+ *
+ * @param salt      Salt value (can be empty/null)
+ * @param salt_len  Length of salt
+ * @param ikm       Input keying material
+ * @param ikm_len   Length of IKM
+ * @param prk       Output buffer for 32-byte PRK
+ */
+void hkdf_extract(
+    const uint8_t* salt,
+    size_t salt_len,
+    const uint8_t* ikm,
+    size_t ikm_len,
+    uint8_t* prk
+);
+
+/*
+ * HKDF-Expand: Expands PRK into output keying material.
+ * OKM = HKDF-Expand(PRK, info, L)
+ *
+ * @param prk       32-byte pseudorandom key from Extract
+ * @param info      Context/application-specific info string
+ * @param info_len  Length of info
+ * @param okm       Output buffer for derived key material
+ * @param okm_len   Desired output length (max 8160 bytes)
+ */
+void hkdf_expand(
+    const uint8_t* prk,
+    const uint8_t* info,
+    size_t info_len,
+    uint8_t* okm,
+    size_t okm_len
+);
+
+/*
+ * Convenience wrapper for HKDF with string info label.
+ *
+ * @param prk    32-byte pseudorandom key
+ * @param label  Null-terminated info string (e.g., "gossip-init")
+ * @param okm    Output buffer for 32-byte derived key
+ */
+void hkdf_expand_label(
+    const uint8_t* prk,
+    const char* label,
+    uint8_t* okm
 );
 
 }  /* namespace crypto */

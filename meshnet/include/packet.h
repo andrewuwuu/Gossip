@@ -17,14 +17,11 @@ constexpr size_t MAX_PAYLOAD_SIZE = 16384;  /* 16KB max */
 constexpr size_t MAX_MESSAGE_LENGTH = 512;  /* IRC-style message limit */
 
 enum class PacketType : uint8_t {
-    PING        = 0x01,
-    PONG        = 0x02,
-    DISCOVER    = 0x10,
-    ANNOUNCE    = 0x11,
-    MESSAGE     = 0x20,
-    MESSAGE_ACK = 0x21,
-    ROUTE       = 0x30,
-    FORWARD     = 0x31
+    HELLO       = 0x01,  /* v1.0 Handshake HELLO */
+    AUTH        = 0x02,  /* v1.0 Handshake AUTH */
+    MSG         = 0x10,  /* Encrypted Message */
+    PING        = 0x20,  /* Keepalive */
+    ERR         = 0xFF   /* Error */
 };
 
 enum PacketFlag : uint8_t {

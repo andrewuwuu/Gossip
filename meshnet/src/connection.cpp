@@ -57,6 +57,22 @@ Connection& Connection::operator=(Connection&& other) noexcept {
     return *this;
 }
 
+void Connection::start_handshake(const Identity& identity, bool is_initiator) {
+    handshake_ = std::make_unique<Handshake>(identity);
+    state_ = State::HANDSHAKING;
+    handshake_start_ = std::chrono::steady_clock::now();
+    
+    if (is_initiator) {
+        gossip::logging::debug("Starting handshake as INITIATOR");
+        auto hello = handshake_->create_hello(true);
+        auto frame = FrameV1::create_hello_frame(hello.data(), hello.size());
+        send_raw(frame.data(), frame.size());
+    } else {
+        gossip::logging::debug("Expecting handshake as RESPONDER");
+        // We wait for their HELLO
+    }
+}
+
 bool Connection::send(const Packet& packet) {
     /*
      * If encryption is enabled, we wrap the payload in an EncryptedFrame.
@@ -68,7 +84,7 @@ bool Connection::send(const Packet& packet) {
      * - Skip encryption for ANNOUNCE (key exchange handshake)
      * - Encrypt all other packets if session is active
      */
-    if (session_ && packet.type() != PacketType::ANNOUNCE) {
+    if (session_) {
         Packet encrypted_packet = packet;
         std::vector<uint8_t> encrypted_payload;
         
@@ -79,6 +95,7 @@ bool Connection::send(const Packet& packet) {
                 FRAME_FLAG_NONE,
                 encrypted_payload)) {
             gossip::logging::error("Encryption failed");
+            close(); // Close connection on critical encryption failure (e.g. key exhaustion)
             return false;
         }
         
@@ -174,91 +191,166 @@ void Connection::process_incoming() {
 }
 
 bool Connection::try_parse_packet() {
-    if (recv_buffer_.size() < HEADER_SIZE) {
+    /*
+     * We need at least 2 bytes to distinguish v1.0 (GR) from Legacy (G + Ver).
+     */
+    if (recv_buffer_.size() < 2) {
         return false;
     }
     
-    PacketHeader header;
-    std::memcpy(&header, recv_buffer_.data(), HEADER_SIZE);
+    uint8_t magic0 = recv_buffer_[0];
+    uint8_t magic1 = recv_buffer_[1];
     
     /*
-     * Check Magic Byte first (no endian swap needed for byte)
+     * Protocol v1.0 Detection: Start with "GR" (0x47 0x52)
      */
-    if (header.magic != MAGIC_BYTE) {
-        std::ostringstream err;
-        err << "Invalid magic byte: 0x" << std::hex << static_cast<int>(header.magic);
-        gossip::logging::error(err.str());
-        // Optimization: Drop 1 byte and retry to resync? Or drop connection?
-        // For now, just drop connection as protocol violation
-        recv_buffer_.clear(); 
-        return false;
-    }
-
-    /*
-     * Convert to host order to check length
-     */
-    PacketHeader host_header = header;
-    host_header.to_host_order();
-    
-    size_t total_size = HEADER_SIZE + host_header.payload_length;
-    if (recv_buffer_.size() < total_size) {
-        /*
-         * Wait for more data
-         */
-        return false;
-    }
-    
-    /*
-     * We have a full packet
-     */
-    std::vector<uint8_t> payload(
-        recv_buffer_.begin() + HEADER_SIZE,
-        recv_buffer_.begin() + total_size
-    );
-    
-    /*
-     * If encryption is enabled, decrypt the payload
-     */
-    /*
-     * If encryption is enabled, decrypt the payload
-     * EXCEPTION: ANNOUNCE packets are always plaintext (handshake)
-     */
-    if (session_ && host_header.type != static_cast<uint8_t>(PacketType::ANNOUNCE)) {
-        std::vector<uint8_t> decrypted_payload;
-        uint8_t flags_out;
-        
-        if (!EncryptedFrame::decrypt(
-                *session_,
-                payload.data(),
-                payload.size(),
-                decrypted_payload,
-                flags_out)) {
-            gossip::logging::error("Decryption failed (auth/replay) - dropping connection");
-            recv_buffer_.clear(); // Drop connection
-            state_ = State::ERROR;
-            if (disconnect_callback_) disconnect_callback_();
+    if (magic0 == protocol::FRAME_MAGIC_0 && magic1 == protocol::FRAME_MAGIC_1) {
+        if (recv_buffer_.size() < protocol::FRAME_HEADER_SIZE) {
             return false;
         }
         
-        payload = std::move(decrypted_payload);
+        protocol::FrameHeader header;
+        std::memcpy(&header, recv_buffer_.data(), protocol::FRAME_HEADER_SIZE);
+        header.to_host_order();
         
-        // Note: Packet header payload_length will mismatch now. 
-        // We construct Packet with the decrypted payload, which updates the header.
-        host_header.payload_length = static_cast<uint16_t>(payload.size());
+        size_t total_size = protocol::FRAME_HEADER_SIZE + header.length;
+        if (recv_buffer_.size() < total_size) {
+            return false; /* Wait for more data */
+        }
+        
+        /* process full frame */
+        if (header.message_type() == protocol::MessageType::HELLO) {
+            std::vector<uint8_t> payload;
+            if (FrameV1::parse_hello_frame(recv_buffer_.data(), total_size, payload)) {
+                if (handshake_ && handshake_->process_hello(payload.data(), payload.size())) {
+                    gossip::logging::debug("Received valid HELLO");
+                    
+                    /* If we are responder (or simultaneous open resolved to responder), send our HELLO now if not sent */
+                    if (handshake_->state() == HandshakeState::HELLO_RECEIVED) {
+                         // If we haven't sent HELLO yet (normal responder case)
+                         // But wait, create_hello() checks state.
+                         // If we are responder, we need to send HELLO now.
+                         auto hello = handshake_->create_hello(false);
+                         auto frame = FrameV1::create_hello_frame(hello.data(), hello.size());
+                         send_raw(frame.data(), frame.size());
+                    }
+                    
+                    if (handshake_->derive_keys()) {
+                        gossip::logging::debug("Keys derived, sending AUTH");
+                        
+                        auto auth_payload = handshake_->create_auth();
+                        std::vector<uint8_t> auth_frame;
+                        
+                        /* Encrypt AUTH with K_init/K_resp and explicit seq=0 */
+                        /* Note: create_auth() returns payload. We need to encrypt it. */
+                        if (FrameV1::encrypt_with_seq(
+                                handshake_->send_key(),
+                                protocol::MessageType::AUTH,
+                                0, /* Auth is always seq 0 */
+                                auth_payload.data(),
+                                auth_payload.size(),
+                                auth_frame)) {
+                            send_raw(auth_frame.data(), auth_frame.size());
+                        }
+                    }
+                } else {
+                    gossip::logging::error("Handshake HELLO failed");
+                    close();
+                    return false;
+                }
+            }
+        } else if (header.message_type() == protocol::MessageType::AUTH) {
+            std::vector<uint8_t> decrypted;
+            protocol::MessageType type;
+            
+            /* Use handshake keys to decrypt AUTH */
+            if (handshake_ && handshake_->state() == HandshakeState::KEYS_DERIVED) {
+                if (FrameV1::decrypt_with_key(
+                        handshake_->recv_key(),
+                        recv_buffer_.data(),
+                        total_size,
+                        decrypted,
+                        type)) {
+                    
+                    uint8_t peer_pubkey[crypto::ED25519_PUBLIC_KEY_SIZE];
+                    if (handshake_->process_auth(decrypted.data(), decrypted.size(), peer_pubkey)) {
+                        /* Check TrustStore if callback set */
+                        if (trust_callback_) {
+                            if (!trust_callback_(nullptr, peer_pubkey)) {
+                                gossip::logging::error("Trust validation failed for peer");
+                                close();
+                                return false;
+                            }
+                        }
+                        
+                        gossip::logging::info("Handshake complete! Authenticated peer.");
+                        
+                        // Set Node ID from handshake (First 2 bytes of PubKey is simplistic but matches legacy uint16)
+                        uint16_t peer_id = (static_cast<uint16_t>(peer_pubkey[0]) << 8) | static_cast<uint16_t>(peer_pubkey[1]);
+                        node_id_ = peer_id;
+
+                        if (handshake_complete_callback_) {
+                            handshake_complete_callback_(peer_id);
+                        }
+                        
+                        /* Create session */
+                        session_ = std::make_shared<Session>(
+                            handshake_->send_key(),
+                            handshake_->recv_key(),
+                            handshake_->is_initiator()
+                        );
+                        state_ = State::CONNECTED;
+                        
+                        // Set Node ID from handshake? 
+                        // Actually NodeID is first 2 bytes of PubKey (IK_pub) in this simplified model?
+                        // Or we need to ask TrustStore.
+                        // For now, let's just proceed.
+                    } else {
+                        gossip::logging::error("AUTH verification failed");
+                        close();
+                        return false;
+                    }
+                } else {
+                    gossip::logging::error("AUTH decryption failed");
+                    close();
+                    return false;
+                }
+            }
+        } else if (session_) {
+            /* Application Data (MSG, PING, etc) */
+            std::vector<uint8_t> decrypted;
+            protocol::MessageType type;
+            uint64_t seq;
+            
+            if (FrameV1::decrypt(*session_, recv_buffer_.data(), total_size, decrypted, type, seq)) {
+                 if (type == protocol::MessageType::MSG) {
+                     /* Convert to legacy Packet for callback compatibility */
+                     /* MessagePayload format: DestID(2) | Len(1) | User | Msg */
+                     /* This is raw payload. Packet() constructor expects legacy header? */
+                     /* We need to fabricate a Packet object */
+                     
+                     // TODO: Clean up this legacy bridge
+                     Packet packet; 
+                     packet.header().magic = MAGIC_BYTE;
+                     packet.header().version = PROTOCOL_VERSION;
+                     packet.header().type = static_cast<uint8_t>(PacketType::MSG);
+                     packet.header().source_id = node_id_; // We might not know source ID yet?
+                     packet.set_payload(decrypted);
+                     
+                     if (packet_callback_) packet_callback_(packet);
+                 }
+            }
+        }
+        
+        recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + total_size);
+        return true;
     }
-    
-    Packet packet(host_header, payload);
-    
+
     /*
-     * Remove from buffer
+     * Legacy Protocol (v0.1) is no longer supported.
+     * Use v1.0 Handshake.
      */
-    recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + total_size);
-    
-    if (packet_callback_) {
-        packet_callback_(packet);
-    }
-    
-    return true;
+    return false;
 }
 
 void Connection::close() {
@@ -267,6 +359,18 @@ void Connection::close() {
         socket_fd_ = -1;
     }
     state_ = State::DISCONNECTED;
+}
+
+bool Connection::check_timeout() {
+    if (state_ == State::HANDSHAKING) {
+        auto now = std::chrono::steady_clock::now();
+        if (now - handshake_start_ > HANDSHAKE_TIMEOUT) {
+            gossip::logging::warn("Handshake timed out");
+            close();
+            return true;
+        }
+    }
+    return false;
 }
 
 ConnectionManager::ConnectionManager(uint16_t listen_port)
@@ -512,6 +616,33 @@ void ConnectionManager::poll(int timeout_ms) {
     
     epoll_event events[64];
     int nfds = epoll_wait(epoll_fd_, events, 64, timeout_ms);
+    
+    /* Check timeouts for all connections periodically */
+    {
+        std::lock_guard<std::mutex> lock(connections_mutex_);
+        
+        /* Check registered connections */
+        for (auto it = connections_.begin(); it != connections_.end();) {
+            if (it->second->check_timeout()) {
+                gossip::logging::info("Closing timed out connection " + std::to_string(it->first));
+                /* Timeout closed the connection, just clean up map */
+                fd_to_node_.erase(it->second->socket_fd());
+                it = connections_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        
+        /* Check unregistered connections */
+        for (auto it = unregistered_connections_.begin(); it != unregistered_connections_.end();) {
+            if ((*it)->check_timeout()) {
+                gossip::logging::info("Closing timed out unregistered connection");
+                it = unregistered_connections_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
     
     for (int i = 0; i < nfds; ++i) {
         if (events[i].data.fd == listen_fd_) {

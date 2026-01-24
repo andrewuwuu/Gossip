@@ -1,12 +1,14 @@
 /*
  * test_session.cpp
  *
- * Unit tests for Session management and Replay Protection.
+ * Unit tests for Session management (v1.0).
  */
 
 #include <gtest/gtest.h>
 #include "../include/session.h"
 #include "../include/crypto.h"
+#include "../include/frame.h"
+#include "../include/protocol.h"
 
 using namespace gossip;
 
@@ -16,97 +18,120 @@ protected:
         crypto::init();
     }
     
-    Session* session;
-    uint8_t key[crypto::KEY_SIZE];
+    Session* session_init;
+    Session* session_resp;
+    uint8_t k_init[32];
+    uint8_t k_resp[32];
 
     void SetUp() override {
-        crypto::random_bytes(key, sizeof(key));
-        session = new Session(key);
+        crypto::random_bytes(k_init, 32);
+        crypto::random_bytes(k_resp, 32);
+        
+        // Simulates two sides of a connection (initiator=true, responder=false)
+        // Note: Responder's send key is Initiator's recv key, and vice versa.
+        session_init = new Session(k_init, k_resp, true);
+        session_resp = new Session(k_resp, k_init, false);
     }
 
     void TearDown() override {
-        delete session;
+        delete session_init;
+        delete session_resp;
     }
 };
 
-TEST_F(SessionTest, SequenceIncrements) {
-    uint64_t s1, s2, s3;
+TEST_F(SessionTest, ImplicitNonceEncryption) {
+    // Initiator encrypts a frame
+    // Uses send_key (K_init) and internal sequence (0)
+    std::vector<uint8_t> plaintext = {0xDE, 0xAD, 0xBE, 0xEF};
+    std::vector<uint8_t> ciphertext;
     
-    ASSERT_TRUE(session->next_send_seq(s1));
-    ASSERT_TRUE(session->next_send_seq(s2));
-    ASSERT_TRUE(session->next_send_seq(s3));
+    // Mock Frame Header (8 bytes)
+    uint8_t header[8] = {0x47, 0x52, 0x10, 0x00, 0x00, 0x04, 0x00, 0x00}; 
+    // Magic(2), Type(1), Flags(1), Len(2), Rsrv(2)
+    // Wait, v1.0 header format in protocol.h? 
+    // Or does FrameV1::encrypt take raw plaintext?
     
-    EXPECT_EQ(s1, 0);
-    EXPECT_EQ(s2, 1);
-    EXPECT_EQ(s3, 2);
+    // Verify Frame::encrypt interface
+    protocol::MessageType type = protocol::MessageType::MSG;
+    uint64_t seq_out;
+    
+    bool ok = FrameV1::encrypt(*session_init, type, plaintext.data(), plaintext.size(), ciphertext, seq_out);
+    ASSERT_TRUE(ok);
+    
+    // Ciphertext size = Header + Plaintext + Tag
+    EXPECT_EQ(ciphertext.size(), 8 + plaintext.size() + 16);
+    
+    // Responder decrypts (Uses recv_key = K_init)
+    std::vector<uint8_t> decrypted;
+    protocol::MessageType dec_type;
+    uint64_t seq;
+    
+    ok = FrameV1::decrypt(*session_resp, ciphertext.data(), ciphertext.size(), decrypted, dec_type, seq);
+    ASSERT_TRUE(ok);
+    
+    EXPECT_EQ(decrypted, plaintext);
+    EXPECT_EQ(dec_type, type);
+    EXPECT_EQ(seq, 0); // First message
 }
 
-TEST_F(SessionTest, ReplayWindowBasics) {
-    // First message should be accepted
-    EXPECT_TRUE(session->check_replay(100));
-    session->update_replay_window(100);
+TEST_F(SessionTest, DirectionalKeys) {
+    // Initiator sends (encrypted with K_init)
+    std::vector<uint8_t> data = {1, 2, 3};
+    std::vector<uint8_t> encrypted_init;
+    uint64_t seq;
+    FrameV1::encrypt(*session_init, protocol::MessageType::MSG, data.data(), data.size(), encrypted_init, seq);
     
-    // Newer message accepted
-    EXPECT_TRUE(session->check_replay(101));
-    session->update_replay_window(101);
+    // Responder sends (encrypted with K_resp)
+    std::vector<uint8_t> encrypted_resp;
+    FrameV1::encrypt(*session_resp, protocol::MessageType::MSG, data.data(), data.size(), encrypted_resp, seq);
     
-    // Duplicate rejected
-    EXPECT_FALSE(session->check_replay(100));
-    EXPECT_FALSE(session->check_replay(101));
+    // They should differ even with same nonce/seq because keys differ
+    EXPECT_NE(encrypted_init, encrypted_resp);
+    
+    // Valid cross-decrypt
+    std::vector<uint8_t> out;
+    protocol::MessageType type;
+    // seq reuse
+
+    
+    // Resp decrypts Init's message (using recv_key = K_init) -> Success
+    EXPECT_TRUE(FrameV1::decrypt(*session_resp, encrypted_init.data(), encrypted_init.size(), out, type, seq));
+    
+    // Init decrypts Resp's message (using recv_key = K_resp) -> Success
+    EXPECT_TRUE(FrameV1::decrypt(*session_init, encrypted_resp.data(), encrypted_resp.size(), out, type, seq));
 }
 
-TEST_F(SessionTest, ReplayWindowOutOfOrder) {
-    // Receive 100
-    session->update_replay_window(100);
+TEST_F(SessionTest, StrictOrdering) {
     
-    // Receive 102 (gap)
-    EXPECT_TRUE(session->check_replay(102));
-    session->update_replay_window(102);
+    std::vector<uint8_t> data = {0xAA};
+    std::vector<uint8_t> c1, c2, c3;
+    uint64_t temp_seq;
     
-    // Receive 101 (filled gap)
-    EXPECT_TRUE(session->check_replay(101));
-    session->update_replay_window(101);
+    FrameV1::encrypt(*session_init, protocol::MessageType::MSG, data.data(), data.size(), c1, temp_seq); // Seq 0
+    FrameV1::encrypt(*session_init, protocol::MessageType::MSG, data.data(), data.size(), c2, temp_seq); // Seq 1
+    FrameV1::encrypt(*session_init, protocol::MessageType::MSG, data.data(), data.size(), c3, temp_seq); // Seq 2
     
-    // All should now be duplicates
-    EXPECT_FALSE(session->check_replay(100));
-    EXPECT_FALSE(session->check_replay(101));
-    EXPECT_FALSE(session->check_replay(102));
-}
-
-TEST_F(SessionTest, ReplayWindowTooOld) {
-    size_t window_size = 64;
-    uint64_t start = 1000;
+    std::vector<uint8_t> out;
+    protocol::MessageType type;
+    uint64_t seq;
     
-    // Set high water mark
-    session->update_replay_window(start);
+    // Receive 0 -> OK
+    EXPECT_TRUE(FrameV1::decrypt(*session_resp, c1.data(), c1.size(), out, type, seq));
     
-    // Message just inside window (start - 63)
-    uint64_t boundary = start - (window_size - 1); 
-    EXPECT_TRUE(session->check_replay(boundary));
+    // Receive 2 -> FAIL (Gap, expected 1)
+    EXPECT_FALSE(FrameV1::decrypt(*session_resp, c3.data(), c3.size(), out, type, seq));
     
-    // Message just outside window (start - 64)
-    uint64_t too_old = start - window_size;
-    EXPECT_FALSE(session->check_replay(too_old));
-}
-
-TEST_F(SessionTest, ReplayWindowSliding) {
-    // Fill window: 100 to 163
-    session->update_replay_window(163);
+    // Receive 1 -> OK
+    EXPECT_TRUE(FrameV1::decrypt(*session_resp, c2.data(), c2.size(), out, type, seq));
     
-    // 100 is now at the edge (163 - 63 = 100)
-    EXPECT_TRUE(session->check_replay(100));
+    // Receive 1 again -> FAIL (Replay)
+    EXPECT_FALSE(FrameV1::decrypt(*session_resp, c2.data(), c2.size(), out, type, seq));
     
-    // Push window forward by 1
-    session->update_replay_window(164);
-    
-    // 100 is now too old (164 - 64 = 100, wait, logic check: 
-    // If recv_highest is 164. Accept if seq > 164 - 64 = 100.
-    // So 100 is effectively old?
-    // Let's check implementation:
-    // if (seq + REPLAY_WINDOW_SIZE <= recv_highest_) return false;
-    // 100 + 64 = 164 <= 164 -> TRUE -> returns false (too old)
-    EXPECT_FALSE(session->check_replay(100));
-    
-    // 101 should still be valid (101 + 64 = 165 > 164)
-    EXPECT_TRUE(session->check_replay(101));
+    // Receive 2 -> FAIL (Wait, strict mode implies if we missed it, we assume broken connection? 
+    // Or do we buffer? FrameV1::decrypt checks:
+    // if (seq != seq_recv_expected_) return false;
+    // So yes, strictly next. Since we failed to decrypt 2 earlier (it wasn't processed),
+    // Recv seq remains at 2 (after 1).
+    // So 2 should pass now.
+    EXPECT_TRUE(FrameV1::decrypt(*session_resp, c3.data(), c3.size(), out, type, seq));
 }

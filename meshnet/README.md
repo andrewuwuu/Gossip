@@ -11,10 +11,11 @@ The network layer is built as a shared/static C++ library (`libgossipnet`) that 
 1. **Connection**: Handles individual TCP sockets, non-blocking I/O, and packet parsing.
 2. **ConnectionManager**: Tracks all active peer connections using `epoll` for event multiplexing.
 3. **MeshNode**: Manages peer discovery (UDP), connection initiation, and packet routing.
-4. **Packet**: Binary serialization/deserialization with Big Endian enforcement.
-5. **Crypto**: XChaCha20-Poly1305 AEAD encryption using libsodium.
-6. **Session**: Manages symmetric keys, sequence numbers, and 64-message replay window.
-7. **Frame**: Encrypted frame serialization/deserialization per Gossip Protocol v0.1.
+4. **Packet**: Binary serialization/deserialization (Big Endian).
+5. **Crypto**: Ed25519 signatures, X25519 key exchange, SHA-256, and HKDF-SHA256.
+6. **Session**: Manages derived XChaCha20-Poly1305 keys, strict directional nonces, and replay protection.
+7. **Handshake**: Implements the `HELLO` -> `AUTH` exchange state machine.
+8. **TrustStore**: Manages pinned peer identities (TOFU).
 
 ## Protocol Detail
 
@@ -30,26 +31,30 @@ The network layer is built as a shared/static C++ library (`libgossipnet`) that 
 | 6 | Sequence | 4 | uint32 | Unique ID for the packet |
 | 10 | Source ID | 2 | uint16 | Originating node ID |
 
-### Encrypted Frame (Gossip Protocol v0.1)
+### Handshake Protocol (v1.0)
 
-When encryption is enabled, message payloads are wrapped in an encrypted frame:
+Encryption is negotiated via an ephemeral handshake:
 
-| Offset | Field | Size | Description |
-|---|---|---|---|
-| 0 | Version | 1 | Frame format version (0x01) |
-| 1 | Flags | 1 | Frame flags |
-| 2 | Sequence | 8 | 64-bit sequence (big-endian) |
-| 10 | Nonce | 24 | Random XChaCha20 nonce |
-| 34 | Ciphertext | N | Encrypted payload |
-| 34+N | Tag | 16 | Poly1305 auth tag |
+1.  **HELLO (0x01)**: Peers exchange ephemeral X25519 public keys.
+2.  **Key Derivation**: Session keys (`K_init`, `K_resp`) are derived using HKDF-SHA256.
+3.  **AUTH (0x02)**: Peers exchange their static Ed25519 public key and a signature over the handshake transcript.
+4.  **Verification**: The signature is verified. If the peer is known, the public key is checked against the TrustStore (pinning).
 
-**AAD (Authenticated Additional Data)**: `version | flags | seq` (10 bytes)
+### UDP Discovery (v1.0)
+
+Nodes broadcast a signed beacon every 5 seconds on the discovery port.
+
+**Format**: `[ Magic(2) | Version(1) | IK_pub(32) | Timestamp(8) | Signature(64) | Port(2) ]`
+
+- **Signature**: Ed25519 signature covering the beacon content.
+- **Timestamp**: Replay protection (valid for ±60 seconds).
 
 ### Packet Types
-- `0x01` PING / `0x02` PONG
-- `0x10` DISCOVER / `0x11` ANNOUNCE
-- `0x20` MESSAGE / `0x21` MESSAGE_ACK
-- `0x31` FORWARD (Mesh routing)
+- `0x01` HELLO
+- `0x02` AUTH
+- `0x10` MSG (Application Data)
+- `0x20` PING (Heartbeat)
+- `0xFF` ERR (Error)
 
 ## CGo Integration
 

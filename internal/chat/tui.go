@@ -76,7 +76,9 @@ func NewTUI(cli *CLI) *TUI {
 	input.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))
 
 	vp := viewport.New(0, 0)
-	initial := "Gossip Mesh Chat\n"
+	// Render banner with color
+	banner := BannerStyle.Render(BannerText)
+	initial := banner + "\n"
 	vp.SetContent(initial)
 
 	return &TUI{
