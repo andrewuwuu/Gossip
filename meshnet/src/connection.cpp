@@ -119,27 +119,43 @@ bool Connection::send(const Packet& packet) {
  *   For robust ness, partial writes should be buffered.
  */
 bool Connection::send_raw(const uint8_t* data, size_t len) {
-    if (state_ != State::CONNECTED || socket_fd_ < 0) {
+    /* Allow sending if Connected or Handshaking */
+    if ((state_ != State::CONNECTED && state_ != State::HANDSHAKING) || socket_fd_ < 0) {
+        gossip::logging::error("send_raw failed: Not connected (fd=" + std::to_string(socket_fd_) + ")");
         return false;
     }
     
     std::lock_guard<std::mutex> lock(send_mutex_);
     
     size_t sent = 0;
+    int loop_count = 0;
     while (sent < len) {
+        loop_count++;
+        if (loop_count > 1000) {
+             gossip::logging::error("send_raw stuck in loop, breaking");
+             return false; 
+        }
+
         ssize_t n = ::send(socket_fd_, data + sent, len - sent, MSG_NOSIGNAL);
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // gossip::logging::debug("send_raw EAGAIN");
                 continue;
             }
             state_ = State::ERROR;
             gossip::logging::error("Send failed: " + std::string(strerror(errno)));
             return false;
         }
+        if (n == 0) {
+            gossip::logging::error("Send returned 0 (connection closed?)");
+            state_ = State::DISCONNECTED;
+            return false;
+        }
         sent += n;
+        // gossip::logging::debug("send_raw wrote chunk: " + std::to_string(n));
     }
     
-    gossip::logging::debug("Sent " + std::to_string(len) + " bytes");
+    gossip::logging::debug("Sent " + std::to_string(len) + " bytes total");
     return true;
 }
 
