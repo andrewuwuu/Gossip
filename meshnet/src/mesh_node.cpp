@@ -497,7 +497,11 @@ void MeshNode::handle_packet(std::shared_ptr<Connection> /*conn*/, const Packet&
                     event.type = MeshEvent::Type::MESSAGE_RECEIVED;
                     event.peer_id = from_id;
                     event.username = msg.username;
-                    event.data.assign(msg.message.begin(), msg.message.end());
+                    /* 
+                     * Pass the full raw payload (DestID + User + Msg) to Go layer 
+                     * so it can parse metadata (DestID) and handle nicknames correctly.
+                     */
+                    event.data = packet.payload();
                     push_event(std::move(event));
                 }
                 
