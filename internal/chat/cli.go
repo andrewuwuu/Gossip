@@ -257,12 +257,17 @@ func (c *CLI) handleEvent(event meshnet.Event) {
 				messageContent := string(data[3+nameLen:])
 
 				// Dispatch based on destination ID
-				if destID := uint16(data[0])<<8 | uint16(data[1]); destID == 0 {
+				destID := uint16(data[0])<<8 | uint16(data[1])
+
+				if destID == 0 {
 					// Broadcast Message (DestID 0)
 					c.handler.HandleBroadcast(event.PeerID, payloadUsername, []byte(messageContent))
-				} else {
-					// Direct Message (Specific DestID)
+				} else if destID == c.config.NodeID {
+					// Direct Message to Us
 					c.handler.HandleIncoming(event.PeerID, payloadUsername, []byte(messageContent))
+				} else {
+					// Message for someone else? Ignore or Log.
+					// c.printf("Received message for unknown destID: %d", destID)
 				}
 				return
 			}
