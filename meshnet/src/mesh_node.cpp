@@ -67,6 +67,14 @@ void MeshNode::set_identity(const uint8_t* public_key, const uint8_t* secret_key
         std::memcpy(identity_public_key_, public_key, 32);
         std::memcpy(identity_secret_key_, secret_key, 64);
         has_identity_ = true;
+
+        /*
+         * Update internal Node ID to match the crypto Identity.
+         * ID = First 2 bytes of Public Key (Big Endian).
+         * This ensures consistency between what we claim and what peers calculate.
+         */
+        node_id_ = (static_cast<uint16_t>(public_key[0]) << 8) | static_cast<uint16_t>(public_key[1]);
+        gossip::logging::info("Identity set. Node ID updated to " + std::to_string(node_id_));
         
         identity_ = std::make_unique<Identity>();
         identity_->set_from_keys(public_key, secret_key);

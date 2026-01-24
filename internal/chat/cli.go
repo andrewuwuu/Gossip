@@ -447,8 +447,9 @@ func (c *CLI) setupIdentity() error {
 	// Try to load existing identity
 	err := c.mesh.LoadIdentity(c.config.IdentityPath)
 	if err == nil {
+		c.syncNodeID()
 		pubKey, _ := c.mesh.GetPublicKeyHex()
-		c.printf("Identity loaded. Public key: %s\n", pubKey[:16]+"...")
+		c.printf("Identity loaded. Node ID: %d, Public key: %s\n", c.config.NodeID, pubKey[:16]+"...")
 		return nil
 	}
 
@@ -488,9 +489,22 @@ func (c *CLI) setupIdentity() error {
 		c.printf("Warning: Failed to save identity: %v\n", err)
 		c.printf("Your public key (copy this): %s\n", pubKey)
 	} else {
-		c.printf("Identity created and saved!\n")
+		c.syncNodeID()
+		c.printf("Identity created and saved! Node ID: %d\n", c.config.NodeID)
 		c.printf("Your public key: %s\n", pubKey)
 	}
 
 	return nil
+}
+
+func (c *CLI) syncNodeID() {
+	newID := c.mesh.GetNodeID()
+	if newID != c.config.NodeID {
+		c.config.NodeID = newID
+		if c.handler != nil {
+			c.handler.mu.Lock()
+			c.handler.nodeID = newID
+			c.handler.mu.Unlock()
+		}
+	}
 }
