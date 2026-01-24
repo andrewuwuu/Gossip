@@ -126,9 +126,17 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !strings.HasSuffix(t.content, "\n") {
 				t.content += "\n"
 			}
+
+			// Capture if we are at bottom BEFORE adding content
+			atBottom := t.viewport.AtBottom()
+
 			t.content += line + "\n"
 			t.viewport.SetContent(t.content)
-			t.viewport.GotoBottom()
+
+			// Only auto-scroll if we were already at bottom
+			if atBottom {
+				t.viewport.GotoBottom()
+			}
 			t.mu.Unlock()
 		}
 		return t, nil

@@ -31,7 +31,6 @@ func NewCLI(cfg *config.Config) *CLI {
 		stopChan: make(chan struct{}),
 	}
 	cli.ui = NewTUI(cli)
-	cli.ui.AppendLine(fmt.Sprintf("Node ID: %d | Listening on port %d | Discovery port %d", cfg.NodeID, cfg.NodePort, cfg.DiscoveryPort))
 	cli.ui.AppendLine("Type /help for available commands")
 	return cli
 }
@@ -82,14 +81,14 @@ func (c *CLI) Run() error {
 		return fmt.Errorf("identity setup failed: %w", err)
 	}
 
+	/*
+	 * Print startup info with standardized Crypto ID
+	 */
+	c.printf("Node ID: %d | Listening on port %d | Discovery port %d",
+		c.config.NodeID, c.config.NodePort, c.config.DiscoveryPort)
+
 	if err := c.mesh.Start(c.config.NodePort, c.config.DiscoveryPort); err != nil {
 		return fmt.Errorf("failed to start mesh: %w", err)
-	}
-
-	if c.ui == nil {
-		c.printf("Node ID: %d | Listening on port %d | Discovery port %d\n",
-			c.config.NodeID, c.config.NodePort, c.config.DiscoveryPort)
-		c.printf("Type /help for available commands\n\n")
 	}
 
 	c.mesh.Discover()
