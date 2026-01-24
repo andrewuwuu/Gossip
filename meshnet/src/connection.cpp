@@ -249,6 +249,9 @@ bool Connection::try_parse_packet() {
         }
         
         /* process full frame */
+        gossip::logging::debug("Processing frame type=" + std::to_string(static_cast<int>(header.message_type())) + 
+                               " len=" + std::to_string(header.length));
+
         if (header.message_type() == protocol::MessageType::HELLO) {
             std::vector<uint8_t> payload;
             if (FrameV1::parse_hello_frame(recv_buffer_.data(), total_size, payload)) {
@@ -345,6 +348,9 @@ bool Connection::try_parse_packet() {
                     close();
                     return false;
                 }
+            } else {
+                gossip::logging::warn("Ignored AUTH frame: Invalid handshake state (" + 
+                    (handshake_ ? std::to_string(static_cast<int>(handshake_->state())) : "null") + ")");
             }
         } else if (session_) {
             /* Application Data (MSG, PING, etc) */
