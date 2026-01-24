@@ -124,11 +124,15 @@ bool Handshake::process_hello(const uint8_t* data, size_t len) {
             /* We are initiator, peer is responder. Store peer's hello as hello_resp_ */
             hello_resp_ = peer_hello;
         } else {
-            /* We are responder, peer is initiator. Store peer's hello as hello_init_ */
-            /* Note: Our hello is already in hello_resp_ if we created it, or will be later */
-            if (hello_init_.empty()) {
-                hello_init_ = peer_hello;
+            /* We are responder, peer is initiator. */
+            /* Simultaneous Open Case: We started as Init (hello_init_ has ours), but need to switch to Resp */
+            
+            if (!hello_init_.empty()) {
+                /* Move our hello to resp */
+                hello_resp_ = hello_init_;
             }
+            /* Store peer's hello as init */
+            hello_init_ = peer_hello;
         }
         
     } else if (state_ == HandshakeState::INITIAL) {
