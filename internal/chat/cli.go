@@ -256,8 +256,14 @@ func (c *CLI) handleEvent(event meshnet.Event) {
 				// Extract Message
 				messageContent := string(data[3+nameLen:])
 
-				// Use parsed username and message content
-				c.handler.HandleIncoming(event.PeerID, payloadUsername, []byte(messageContent))
+				// Dispatch based on destination ID
+				if destID := uint16(data[0])<<8 | uint16(data[1]); destID == 0 {
+					// Broadcast Message (DestID 0)
+					c.handler.HandleBroadcast(event.PeerID, payloadUsername, []byte(messageContent))
+				} else {
+					// Direct Message (Specific DestID)
+					c.handler.HandleIncoming(event.PeerID, payloadUsername, []byte(messageContent))
+				}
 				return
 			}
 		}
