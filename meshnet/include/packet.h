@@ -197,15 +197,20 @@ struct MessagePayload {
         if (message.size() > MAX_MESSAGE_LENGTH) {
             return {};
         }
-        std::vector<uint8_t> buffer;
-        buffer.reserve(2 + 1 + username.size() + message.size());
+        std::vector<uint8_t> buffer(3 + username.size() + message.size());
+        uint8_t* ptr = buffer.data();
         
-        buffer.push_back(static_cast<uint8_t>((dest_id >> 8) & 0xFF));
-        buffer.push_back(static_cast<uint8_t>(dest_id & 0xFF));
+        ptr[0] = static_cast<uint8_t>((dest_id >> 8) & 0xFF);
+        ptr[1] = static_cast<uint8_t>(dest_id & 0xFF);
+        ptr[2] = static_cast<uint8_t>(username.size());
         
-        buffer.push_back(static_cast<uint8_t>(username.size()));
-        buffer.insert(buffer.end(), username.begin(), username.end());
-        buffer.insert(buffer.end(), message.begin(), message.end());
+        if (!username.empty()) {
+            std::memcpy(ptr + 3, username.data(), username.size());
+        }
+        
+        if (!message.empty()) {
+            std::memcpy(ptr + 3 + username.size(), message.data(), message.size());
+        }
         
         return buffer;
     }

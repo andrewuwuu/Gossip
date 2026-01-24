@@ -113,7 +113,7 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
         /*
          * Start v1.0 Handshake as Responder
          */
-        conn->set_trust_callback([this](const uint8_t* node_id, const uint8_t* pubkey) {
+        conn->set_trust_callback([this](const uint8_t* /*node_id*/, const uint8_t* pubkey) {
             if (trust_store_) {
                 return !trust_store_->should_reject(pubkey, pubkey);
             }
@@ -308,7 +308,7 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
      * Start v1.0 Handshake as Initiator
      */
     if (identity_) {
-        conn->set_trust_callback([this](const uint8_t* node_id, const uint8_t* pubkey) {
+        conn->set_trust_callback([this](const uint8_t* /*node_id*/, const uint8_t* pubkey) {
             if (trust_store_) {
                 return !trust_store_->should_reject(pubkey, pubkey);
             }
@@ -388,7 +388,7 @@ void MeshNode::discover_peers() {
         std::chrono::system_clock::now().time_since_epoch()
     ).count();
     
-    uint64_t now_be = htobe64(now_sec); // Requires endian.h or manual
+    // uint64_t now_be = htobe64(now_sec); // Requires endian.h or manual
     // Portable manual BE encoding for uint64
     for (int i = 7; i >= 0; --i) {
         beacon.push_back(static_cast<uint8_t>((now_sec >> (i * 8)) & 0xFF));
@@ -462,7 +462,7 @@ void MeshNode::poll_events(int timeout_ms) {
  * - Dispatches based on packet type (PING, MESSAGE, ANNOUNCE, etc.)
  * - Handles routing (forwarding broadcast messages)
  */
-void MeshNode::handle_packet(std::shared_ptr<Connection> conn, const Packet& packet) {
+void MeshNode::handle_packet(std::shared_ptr<Connection> /*conn*/, const Packet& packet) {
     if (is_duplicate(packet.source_id(), packet.sequence())) {
         return;
     }
