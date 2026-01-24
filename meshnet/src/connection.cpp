@@ -297,7 +297,8 @@ bool Connection::try_parse_packet() {
             protocol::MessageType type;
             
             /* Use handshake keys to decrypt AUTH */
-            if (handshake_ && handshake_->state() == HandshakeState::KEYS_DERIVED) {
+            if (handshake_ && (handshake_->state() == HandshakeState::KEYS_DERIVED || 
+                               handshake_->state() == HandshakeState::AUTH_SENT)) {
                 if (FrameV1::decrypt_with_key(
                         handshake_->recv_key(),
                         recv_buffer_.data(),
