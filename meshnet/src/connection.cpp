@@ -168,7 +168,8 @@ bool Connection::send_raw(const uint8_t* data, size_t len) {
  * - Triggers try_parse_packet() loop to extract full messages from stream
  */
 void Connection::process_incoming() {
-    if (state_ != State::CONNECTED || socket_fd_ < 0) {
+    /* Allow reading if Connected or Handshaking */
+    if ((state_ != State::CONNECTED && state_ != State::HANDSHAKING) || socket_fd_ < 0) {
         return;
     }
     
