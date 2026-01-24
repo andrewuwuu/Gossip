@@ -11,7 +11,8 @@
 #include <mutex>
 #include <queue>
 
-static std::unique_ptr<gossip::MeshNode> g_node;
+static std::shared_ptr<gossip::MeshNode> g_node;
+static std::mutex g_node_mutex;
 static std::mutex g_event_queue_mutex;
 static std::queue<gossip::MeshEvent> g_pending_events;
 static bool g_callback_set = false;
@@ -32,11 +33,12 @@ extern "C" {
  * where g_node holds the state of the network layer.
  */
 int gossip_init(uint16_t node_id) {
+    std::lock_guard<std::mutex> lock(g_node_mutex);
     if (g_node) {
         return -1;
     }
     
-    g_node = std::make_unique<gossip::MeshNode>(node_id);
+    g_node = std::make_shared<gossip::MeshNode>(node_id);
     return 0;
 }
 
@@ -47,23 +49,43 @@ int gossip_init(uint16_t node_id) {
  * Returns failure if the node hasn't been initialized via gossip_init.
  */
 int gossip_start(uint16_t listen_port, uint16_t discovery_port) {
-    if (!g_node) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+    
+    if (!node) {
         return -1;
     }
     
-    return g_node->start(listen_port, discovery_port) ? 0 : -1;
+    return node->start(listen_port, discovery_port) ? 0 : -1;
 }
 
 void gossip_stop(void) {
-    if (g_node) {
-        g_node->stop();
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+    
+    if (node) {
+        node->stop();
     }
 }
 
 void gossip_destroy(void) {
-    if (g_node) {
-        g_node->stop();
-        g_node.reset();
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+        g_node.reset(); // Clear global pointer
+    }
+    
+    if (node) {
+        node->stop();
+        // node goes out of scope here, reducing refcount. 
+        // If 'gossip_poll_event' holds a copy, the object survives until that function returns.
     }
     g_callback_set = false;
     std::lock_guard<std::mutex> lock(g_event_queue_mutex);
@@ -73,37 +95,61 @@ void gossip_destroy(void) {
 }
 
 int gossip_connect(const char* address, uint16_t port) {
-    if (!g_node || !address) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+    
+    if (!node || !address) {
         return -1;
     }
     
-    return g_node->connect_to_peer(address, port) ? 0 : -1;
+    return node->connect_to_peer(address, port) ? 0 : -1;
 }
 
 void gossip_discover(void) {
-    if (g_node) {
-        g_node->discover_peers();
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+    
+    if (node) {
+        node->discover_peers();
     }
 }
 
 int gossip_send_message(uint16_t dest_id, const char* username,
                         const char* message, size_t message_len,
                         int require_ack) {
-    if (!g_node || !username || !message) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (!node || !username || !message) {
         return -1;
     }
     
     std::string msg(message, message_len);
-    return g_node->send_message(dest_id, username, msg, require_ack != 0) ? 0 : -1;
+    return node->send_message(dest_id, username, msg, require_ack != 0) ? 0 : -1;
 }
 
 int gossip_broadcast(const char* username, const char* message, size_t message_len) {
-    if (!g_node || !username || !message) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (!node || !username || !message) {
         return -1;
     }
     
     std::string msg(message, message_len);
-    return g_node->broadcast_message(username, msg) ? 0 : -1;
+    return node->broadcast_message(username, msg) ? 0 : -1;
 }
 
 /*
@@ -118,7 +164,13 @@ int gossip_broadcast(const char* username, const char* message, size_t message_l
  * for CGo hash/memory compatibility between Go and C++.
  */
 int gossip_poll_event(GossipEvent* event, int timeout_ms) {
-    if (!g_node || !event) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (!node || !event) {
         return -1;
     }
     
@@ -126,14 +178,14 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
      * Set up the callback only once to avoid resetting it on every poll
      */
     if (!g_callback_set) {
-        g_node->set_event_callback([](const gossip::MeshEvent& e) {
+        node->set_event_callback([](const gossip::MeshEvent& e) {
             std::lock_guard<std::mutex> lock(g_event_queue_mutex);
             g_pending_events.push(e);
         });
         g_callback_set = true;
     }
     
-    g_node->poll_events(timeout_ms);
+    node->poll_events(timeout_ms);
     
     std::lock_guard<std::mutex> lock(g_event_queue_mutex);
     if (g_pending_events.empty()) {
@@ -172,18 +224,30 @@ int gossip_poll_event(GossipEvent* event, int timeout_ms) {
 }
 
 uint16_t gossip_get_node_id(void) {
-    if (!g_node) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (!node) {
         return 0;
     }
-    return g_node->node_id();
+    return node->node_id();
 }
 
 int gossip_get_peers(GossipPeerInfo* peers, size_t max_peers) {
-    if (!g_node || !peers || max_peers == 0) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (!node || !peers || max_peers == 0) {
         return -1;
     }
     
-    auto peer_list = g_node->get_peers();
+    auto peer_list = node->get_peers();
     size_t count = std::min(peer_list.size(), max_peers);
     
     for (size_t i = 0; i < count; ++i) {
@@ -199,14 +263,25 @@ int gossip_get_peers(GossipPeerInfo* peers, size_t max_peers) {
 }
 
 int gossip_get_peer_count(void) {
-    if (!g_node) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (!node) {
         return 0;
     }
-    return static_cast<int>(g_node->get_peers().size());
+    return static_cast<int>(node->get_peers().size());
 }
 
 int gossip_is_running(void) {
-    return (g_node && g_node->is_running()) ? 1 : 0;
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+    return (node && node->is_running()) ? 1 : 0;
 }
 
 /*
@@ -224,7 +299,12 @@ int gossip_set_session_key(const uint8_t* key) {
         return -1;
     }
     
-    if (g_node && g_node->is_running()) {
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+    if (node && node->is_running()) {
         return -1;  /* Cannot change key while running */
     }
     
@@ -240,8 +320,16 @@ int gossip_set_session_key(const uint8_t* key) {
     
     g_session = std::make_shared<gossip::Session>(key);
     
-    if (g_node) {
-        g_node->set_session(g_session);
+    /*
+     * Update session on existing node if present
+     */
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (node) {
+        node->set_session(g_session);
     }
     
     gossip::logging::info("Session key configured, encryption enabled");
@@ -323,8 +411,14 @@ int gossip_load_identity(const char* path) {
     /*
      * Propagate identity to MeshNode if it exists
      */
-    if (g_node) {
-        g_node->set_identity(g_identity->public_key(), g_identity->secret_key());
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (node) {
+        node->set_identity(g_identity->public_key(), g_identity->secret_key());
     }
     
     gossip::logging::info("Identity loaded from " + std::string(path));
@@ -367,8 +461,14 @@ int gossip_set_private_key(const uint8_t* private_key) {
     /*
      * Propagate identity to MeshNode if it exists
      */
-    if (g_node) {
-        g_node->set_identity(g_identity->public_key(), g_identity->secret_key());
+    std::shared_ptr<gossip::MeshNode> node;
+    {
+        std::lock_guard<std::mutex> lock(g_node_mutex);
+        node = g_node;
+    }
+
+    if (node) {
+        node->set_identity(g_identity->public_key(), g_identity->secret_key());
     }
     
     gossip::logging::info("Identity generated");
