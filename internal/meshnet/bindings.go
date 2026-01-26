@@ -11,19 +11,29 @@ import "C"
 
 import (
 	"errors"
+	"fmt"
 	"gossip/internal/logging"
 	"sync"
 	"unsafe"
 )
 
 var (
-	ErrNotInitialized   = errors.New("mesh network not initialized")
-	ErrNotRunning       = errors.New("mesh network not running")
-	ErrInvalidParam     = errors.New("invalid parameter")
-	ErrAlreadyRunning   = errors.New("cannot change key while running")
-	ErrInvalidKeyLength = errors.New("key must be 32 bytes")
-	ErrInvalidHex       = errors.New("invalid hex string")
+	ErrNotInitialized   = &GossipError{Code: -2, Message: "mesh network not initialized"}
+	ErrNotRunning       = &GossipError{Code: -3, Message: "mesh network not running"}
+	ErrInvalidParam     = &GossipError{Code: -4, Message: "invalid parameter"}
+	ErrAlreadyRunning   = &GossipError{Code: -5, Message: "cannot change key while running"}
+	ErrInvalidKeyLength = &GossipError{Code: -6, Message: "key must be 32 bytes"}
+	ErrInvalidHex       = &GossipError{Code: -7, Message: "invalid hex string"}
 )
+
+type GossipError struct {
+	Code    int
+	Message string
+}
+
+func (e *GossipError) Error() string {
+	return fmt.Sprintf("gossip error %d: %s", e.Code, e.Message)
+}
 
 const (
 	maxMessageLen = 512
@@ -74,7 +84,7 @@ func New(nodeID uint16) (*MeshNet, error) {
 	once.Do(func() {
 		result := C.gossip_init(C.uint16_t(nodeID))
 		if result != 0 {
-			initErr = errors.New("failed to initialize mesh network")
+			initErr = &GossipError{Code: int(result), Message: "failed to initialize mesh network"}
 			return
 		}
 		instance = &MeshNet{
@@ -88,7 +98,7 @@ func New(nodeID uint16) (*MeshNet, error) {
 	}
 
 	if instance == nil {
-		return nil, errors.New("mesh network initialization incomplete")
+		return nil, &GossipError{Code: -1, Message: "mesh network initialization incomplete"}
 	}
 
 	return instance, nil
@@ -104,7 +114,7 @@ func (m *MeshNet) Start(listenPort, discoveryPort uint16) error {
 
 	result := C.gossip_start(C.uint16_t(listenPort), C.uint16_t(discoveryPort))
 	if result != 0 {
-		return errors.New("failed to start mesh network")
+		return &GossipError{Code: int(result), Message: "failed to start mesh network"}
 	}
 
 	m.running = true
@@ -155,7 +165,7 @@ func (m *MeshNet) Connect(address string, port uint16) error {
 
 	result := C.gossip_connect(cAddr, C.uint16_t(port))
 	if result != 0 {
-		return errors.New("failed to connect to peer")
+		return &GossipError{Code: int(result), Message: "failed to connect to peer"}
 	}
 
 	return nil
@@ -206,7 +216,7 @@ func (m *MeshNet) SendMessage(destID uint16, username, message string, requireAc
 	)
 
 	if result != 0 {
-		return errors.New("failed to send message")
+		return &GossipError{Code: int(result), Message: "failed to send message"}
 	}
 
 	return nil
@@ -236,7 +246,7 @@ func (m *MeshNet) Broadcast(username, message string) error {
 
 	result := C.gossip_broadcast(cUsername, cMessage, C.size_t(len(message)))
 	if result != 0 {
-		return errors.New("failed to broadcast message")
+		return &GossipError{Code: int(result), Message: "failed to broadcast message"}
 	}
 
 	return nil
@@ -312,7 +322,7 @@ func (m *MeshNet) SetSessionKey(key []byte) error {
 
 	result := C.gossip_set_session_key((*C.uint8_t)(unsafe.Pointer(&key[0])))
 	if result != 0 {
-		return errors.New("failed to set session key")
+		return &GossipError{Code: int(result), Message: "failed to set session key"}
 	}
 
 	return nil
@@ -412,7 +422,7 @@ func (m *MeshNet) LoadIdentity(path string) error {
 	defer C.free(unsafe.Pointer(cPath))
 
 	if C.gossip_load_identity(cPath) != 0 {
-		return errors.New("failed to load identity from " + path)
+		return &GossipError{Code: -1, Message: "failed to load identity from " + path}
 	}
 	return nil
 }
@@ -423,7 +433,7 @@ func (m *MeshNet) SaveIdentity(path string) error {
 	defer C.free(unsafe.Pointer(cPath))
 
 	if C.gossip_save_identity(cPath) != 0 {
-		return errors.New("failed to save identity to " + path)
+		return &GossipError{Code: -1, Message: "failed to save identity to " + path}
 	}
 	return nil
 }
@@ -440,13 +450,13 @@ func (m *MeshNet) GenerateIdentity() (publicKeyHex string, err error) {
 	// Actually the C API stores it globally when loaded.
 	// For now, we directly call set_private_key to use the generated key.
 	if C.gossip_set_private_key((*C.uint8_t)(&privKey[0])) != 0 {
-		return "", errors.New("failed to set generated identity")
+		return "", &GossipError{Code: -1, Message: "failed to set generated identity"}
 	}
 
 	// Get public key hex
 	var hexBuf [65]C.char
 	if C.gossip_get_public_key_hex(&hexBuf[0]) != 0 {
-		return "", errors.New("failed to get public key")
+		return "", &GossipError{Code: -1, Message: "failed to get public key"}
 	}
 
 	return C.GoString(&hexBuf[0]), nil
@@ -463,9 +473,10 @@ func (m *MeshNet) GetPublicKeyHex() (string, error) {
 		return "", ErrNoIdentity
 	}
 
+	// Get public key hex
 	var hexBuf [65]C.char
 	if C.gossip_get_public_key_hex(&hexBuf[0]) != 0 {
-		return "", errors.New("failed to get public key")
+		return "", &GossipError{Code: -1, Message: "failed to get public key"}
 	}
 
 	return C.GoString(&hexBuf[0]), nil
