@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <iostream>
 #include <sstream>
+#include <thread>
 
 namespace gossip {
 
@@ -129,17 +130,28 @@ bool Connection::send_raw(const uint8_t* data, size_t len) {
     
     size_t sent = 0;
     int loop_count = 0;
+    
+    /*
+     * Configuration for retry behavior:
+     * - MAX_RETRY_LOOPS: Maximum retries before dropping packet
+     * - EAGAIN_SLEEP_US: Microseconds to sleep on EAGAIN (yields CPU)
+     */
+    const int MAX_RETRY_LOOPS = 100;
+    const int EAGAIN_SLEEP_US = 1000; /* 1ms sleep on EAGAIN */
+    
     while (sent < len) {
         loop_count++;
-        if (loop_count > 1000) {
-             gossip::logging::error("send_raw stuck in loop, breaking");
-             return false; 
+        if (loop_count > MAX_RETRY_LOOPS) {
+            gossip::logging::error("send_raw: socket buffer full after " + 
+                                   std::to_string(MAX_RETRY_LOOPS) + " retries, dropping packet");
+            return false;
         }
 
         ssize_t n = ::send(socket_fd_, data + sent, len - sent, MSG_NOSIGNAL);
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // gossip::logging::debug("send_raw EAGAIN");
+                /* Yield CPU instead of busy-waiting */
+                std::this_thread::sleep_for(std::chrono::microseconds(EAGAIN_SLEEP_US));
                 continue;
             }
             state_ = State::ERROR;
@@ -152,7 +164,6 @@ bool Connection::send_raw(const uint8_t* data, size_t len) {
             return false;
         }
         sent += n;
-        // gossip::logging::debug("send_raw wrote chunk: " + std::to_string(n));
     }
     
     gossip::logging::debug("Sent " + std::to_string(len) + " bytes total");

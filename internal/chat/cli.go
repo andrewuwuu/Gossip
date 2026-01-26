@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gossip/internal/config"
@@ -21,6 +22,7 @@ type CLI struct {
 	running  bool
 	stopChan chan struct{}
 	ui       *TUI
+	wg       sync.WaitGroup
 }
 
 func NewCLI(cfg *config.Config) *CLI {
@@ -103,6 +105,20 @@ func (c *CLI) Run() error {
 func (c *CLI) Stop() {
 	c.running = false
 	close(c.stopChan)
+
+	/* Wait for pending operations with timeout */
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		/* Graceful shutdown completed */
+	case <-time.After(5 * time.Second):
+		c.printf("Shutdown timeout exceeded, forcing exit")
+	}
 
 	if c.mesh != nil {
 		c.mesh.Destroy()
@@ -305,9 +321,8 @@ func (c *CLI) sendDirectMessage(peerID uint16, message string) {
 		return
 	}
 
-	msg := c.handler.CreateOutgoing(peerID, message, false)
+	c.handler.CreateOutgoing(peerID, message, false)
 	c.printf("[→ %d] %s\n", peerID, message)
-	_ = msg
 }
 
 func (c *CLI) displayMessage(msg Message) {
@@ -434,10 +449,6 @@ func (c *CLI) clearScreen() {
 	fmt.Print("\033[H\033[2J")
 }
 
-func init() {
-	_ = time.Now
-}
-
 /*
  * setupIdentity handles PKI identity loading/generation.
  * If no identity file exists, prompts the user to generate one.
@@ -501,9 +512,7 @@ func (c *CLI) syncNodeID() {
 	if newID != c.config.NodeID {
 		c.config.NodeID = newID
 		if c.handler != nil {
-			c.handler.mu.Lock()
-			c.handler.nodeID = newID
-			c.handler.mu.Unlock()
+			c.handler.SetNodeID(newID)
 		}
 	}
 }

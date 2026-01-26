@@ -265,18 +265,15 @@ func (t *TUI) Quit() {
 }
 
 func (t *TUI) handleInput(text string) {
-	go func() {
-		if strings.HasPrefix(text, "/") {
-			if t.cli != nil {
-				t.cli.handleCommand(text)
-			}
-			return
-		}
+	if t.cli == nil {
+		return
+	}
 
-		if t.cli != nil {
-			t.cli.sendBroadcast(text)
-		}
-	}()
+	if strings.HasPrefix(text, "/") {
+		t.cli.handleCommand(text)
+	} else {
+		t.cli.sendBroadcast(text)
+	}
 }
 
 func max(a, b int) int {

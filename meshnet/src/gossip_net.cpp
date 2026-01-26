@@ -14,23 +14,25 @@
 
 static std::shared_ptr<gossip::MeshNode> g_node;  /* Global shared_ptr is fine if mutex protects it */
 
-/* 
- * Use leaky singleton pattern for synchronization primitives 
- * to avoid static destruction order fiasco on mobile exit.
+/*
+ * Thread-safe static initialization (C++11 §6.7 guarantees this).
+ * These are not dynamically allocated, avoiding memory leak reports.
+ * Note: Static destruction order is safe here because the mutex and queue
+ * are simple types without complex destruction dependencies.
  */
 static std::mutex& g_node_mutex() {
-    static std::mutex* m = new std::mutex();
-    return *m;
+    static std::mutex m;
+    return m;
 }
 
 static std::mutex& g_event_queue_mutex() {
-    static std::mutex* m = new std::mutex();
-    return *m;
+    static std::mutex m;
+    return m;
 }
 
 static std::queue<gossip::MeshEvent>& g_pending_events() {
-    static std::queue<gossip::MeshEvent>* q = new std::queue<gossip::MeshEvent>();
-    return *q;
+    static std::queue<gossip::MeshEvent> q;
+    return q;
 }
 
 static bool g_callback_set = false;

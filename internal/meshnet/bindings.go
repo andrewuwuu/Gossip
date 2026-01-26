@@ -68,13 +68,13 @@ type MeshNet struct {
 
 var instance *MeshNet
 var once sync.Once
+var initErr error
 
 func New(nodeID uint16) (*MeshNet, error) {
-	var err error
 	once.Do(func() {
 		result := C.gossip_init(C.uint16_t(nodeID))
 		if result != 0 {
-			err = errors.New("failed to initialize mesh network")
+			initErr = errors.New("failed to initialize mesh network")
 			return
 		}
 		instance = &MeshNet{
@@ -83,12 +83,12 @@ func New(nodeID uint16) (*MeshNet, error) {
 		}
 	})
 
-	if err != nil {
-		return nil, err
+	if initErr != nil {
+		return nil, initErr
 	}
 
 	if instance == nil {
-		return nil, errors.New("mesh network already initialized")
+		return nil, errors.New("mesh network initialization incomplete")
 	}
 
 	return instance, nil

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"gossip/internal/logging"
+
 	"github.com/joho/godotenv"
 )
 
@@ -26,6 +28,10 @@ type Config struct {
 
 func Load() (*Config, error) {
 	if err := godotenv.Load(); err != nil {
+		/* Only warn if it's not a file-not-found error */
+		if !os.IsNotExist(err) {
+			logging.Warnf("Warning: Failed to load .env file: %v", err)
+		}
 	}
 
 	cfg := &Config{

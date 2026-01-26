@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"gossip/internal/logging"
 )
 
 type Message struct {
@@ -130,6 +132,16 @@ func (h *MessageHandler) CreateOutgoing(toID uint16, content string, broadcast b
 	return msg
 }
 
+/*
+ * SetNodeID safely updates the node ID for outgoing messages.
+ * This should be called when the node ID changes (e.g., after identity load).
+ */
+func (h *MessageHandler) SetNodeID(newID uint16) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.nodeID = newID
+}
+
 func (h *MessageHandler) MarkDelivered(messageID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -198,10 +210,13 @@ func (h *MessageHandler) saveHistory() {
 
 	data, err := json.MarshalIndent(messages, "", "  ")
 	if err != nil {
+		logging.Errorf("Failed to marshal message history: %v", err)
 		return
 	}
 
-	_ = os.WriteFile(h.historyPath, data, 0644)
+	if err := os.WriteFile(h.historyPath, data, 0644); err != nil {
+		logging.Errorf("Failed to write history to %s: %v", h.historyPath, err)
+	}
 }
 
 func generateMessageID() string {
