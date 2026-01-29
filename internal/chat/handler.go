@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -221,6 +222,9 @@ func (h *MessageHandler) saveHistory() {
 
 func generateMessageID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to timestamp-based ID if crypto/rand fails
+		return hex.EncodeToString([]byte(fmt.Sprintf("%08x", time.Now().UnixNano())))
+	}
 	return hex.EncodeToString(b)
 }

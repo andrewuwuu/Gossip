@@ -8,9 +8,12 @@ import (
 
 	"gossip/internal/chat"
 	"gossip/internal/config"
+	"gossip/internal/logging"
 )
 
 func main() {
+	defer logging.Close()
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)

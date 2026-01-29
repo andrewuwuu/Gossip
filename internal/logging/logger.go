@@ -86,3 +86,13 @@ func sanitize(input string) string {
 
 	return strings.TrimSpace(builder.String())
 }
+
+// Close closes the log file. Should be called on application shutdown.
+func Close() {
+	logMu.Lock()
+	defer logMu.Unlock()
+	if logFile != nil {
+		_ = logFile.Close()
+		logFile = nil
+	}
+}
