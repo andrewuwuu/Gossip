@@ -6,6 +6,7 @@
 #include <vector>
 #include <array>
 #include <string>
+#include <atomic>
 #include <arpa/inet.h>
 
 namespace gossip {
@@ -177,7 +178,7 @@ private:
     PacketHeader header_{};
     std::vector<uint8_t> payload_;
     
-    static inline uint32_t next_sequence_ = 0;
+    static inline std::atomic<uint32_t> next_sequence_{0};
 };
 
 struct MessagePayload {
@@ -195,6 +196,10 @@ struct MessagePayload {
     
     std::vector<uint8_t> serialize() const {
         if (message.size() > MAX_MESSAGE_LENGTH) {
+            return {};
+        }
+        /* Enforce username length fits in 1 byte */
+        if (username.size() > 255) {
             return {};
         }
         std::vector<uint8_t> buffer(3 + username.size() + message.size());

@@ -1,5 +1,6 @@
 #include "trust_store.h"
 #include <cstring>
+#include <ctime>
 
 namespace gossip {
 

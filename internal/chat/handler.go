@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -34,6 +35,7 @@ type MessageHandler struct {
 
 	onMessage func(Message)
 	mu        sync.RWMutex
+	saveMu    sync.Mutex /* Serializes file writes to prevent corruption */
 }
 
 func NewMessageHandler(username string, nodeID uint16) *MessageHandler {
@@ -198,11 +200,22 @@ func (h *MessageHandler) loadHistory() error {
 		return err
 	}
 
+	/* Enforce maxMessages limit on loaded history */
+	if len(messages) > h.maxMessages {
+		messages = messages[len(messages)-h.maxMessages:]
+	}
+
 	h.messages = messages
 	return nil
 }
 
 func (h *MessageHandler) saveHistory() {
+	/* Skip if another save is already in progress to prevent goroutine pile-up */
+	if !h.saveMu.TryLock() {
+		return
+	}
+	defer h.saveMu.Unlock()
+
 	h.mu.RLock()
 	messages := make([]Message, len(h.messages))
 	copy(messages, h.messages)
@@ -219,8 +232,26 @@ func (h *MessageHandler) saveHistory() {
 	}
 }
 
-func generateMessageID() string {
+func generateMessageID() (id string) {
+	/* Handle both errors (Go <1.21) and panics (Go 1.21+) on rand.Read failure */
+	defer func() {
+		if r := recover(); r != nil {
+			/* Fallback to timestamp-based ID on rand panic */
+			id = fmt.Sprintf("%d", time.Now().UnixNano())
+		}
+	}()
+
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		/* Fallback to timestamp-based ID on rand error */
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
 	return hex.EncodeToString(b)
+}
+
+/* SetUsername updates the handler's username for outgoing messages */
+func (h *MessageHandler) SetUsername(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.username = name
 }

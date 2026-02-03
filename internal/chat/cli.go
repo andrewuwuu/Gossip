@@ -21,6 +21,7 @@ type CLI struct {
 	reader   *bufio.Reader
 	running  bool
 	stopChan chan struct{}
+	stopOnce sync.Once
 	ui       *TUI
 	wg       sync.WaitGroup
 }
@@ -104,7 +105,9 @@ func (c *CLI) Run() error {
 
 func (c *CLI) Stop() {
 	c.running = false
-	close(c.stopChan)
+	c.stopOnce.Do(func() {
+		close(c.stopChan)
+	})
 
 	/* Wait for pending operations with timeout */
 	done := make(chan struct{})
@@ -203,6 +206,7 @@ func (c *CLI) handleCommand(line string) {
 			return
 		}
 		c.config.Username = parts[1]
+		c.handler.SetUsername(parts[1])
 		c.printf("Username changed to: %s\n", c.config.Username)
 
 	case "/history":

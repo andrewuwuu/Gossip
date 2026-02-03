@@ -8,6 +8,7 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <cerrno>
 #include <cstring>
 #include <algorithm>
@@ -90,12 +91,29 @@ bool Connection::send(const Packet& packet) {
         std::vector<uint8_t> frame_out;
         uint64_t seq_out;
         
-        /* Encrypt internal payload using FrameV1 MSG type */
+        /*
+         * Preserve packet header info in encrypted payload:
+         * [type(1) | flags(1) | source_id(2) | payload_len(2) | payload...]
+         * This allows the receiver to recover FLAG_BROADCAST and other metadata.
+         */
+        std::vector<uint8_t> wrapped_payload;
+        wrapped_payload.reserve(6 + packet.payload().size());
+        wrapped_payload.push_back(static_cast<uint8_t>(packet.type()));
+        wrapped_payload.push_back(packet.flags());
+        wrapped_payload.push_back(static_cast<uint8_t>((packet.source_id() >> 8) & 0xFF));
+        wrapped_payload.push_back(static_cast<uint8_t>(packet.source_id() & 0xFF));
+        uint16_t payload_len = static_cast<uint16_t>(packet.payload().size());
+        wrapped_payload.push_back(static_cast<uint8_t>((payload_len >> 8) & 0xFF));
+        wrapped_payload.push_back(static_cast<uint8_t>(payload_len & 0xFF));
+        wrapped_payload.insert(wrapped_payload.end(), 
+                               packet.payload().begin(), packet.payload().end());
+        
+        /* Encrypt wrapped payload using FrameV1 MSG type */
         if (!FrameV1::encrypt(
                 *session_,
                 protocol::MessageType::MSG,
-                packet.payload().data(),
-                packet.payload().size(),
+                wrapped_payload.data(),
+                wrapped_payload.size(),
                 frame_out,
                 seq_out)) {
             gossip::logging::error("Encryption failed");
@@ -212,6 +230,17 @@ void Connection::process_incoming() {
         
         gossip::logging::debug("Received bytes: " + std::to_string(n));
         recv_buffer_.insert(recv_buffer_.end(), buffer, buffer + n);
+        
+        /* Prevent memory exhaustion from malicious/broken peers */
+        constexpr size_t MAX_RECV_BUFFER_SIZE = 1024 * 1024;  /* 1MB */
+        if (recv_buffer_.size() > MAX_RECV_BUFFER_SIZE) {
+            gossip::logging::error("Receive buffer overflow (>1MB), closing connection");
+            state_ = State::ERROR;
+            if (disconnect_callback_) {
+                disconnect_callback_();
+            }
+            return;
+        }
         
         while (try_parse_packet()) {
             if ((state_ != State::CONNECTED && state_ != State::HANDSHAKING) || socket_fd_ < 0) {
@@ -370,15 +399,37 @@ bool Connection::try_parse_packet() {
             
             if (FrameV1::decrypt(*session_, recv_buffer_.data(), total_size, decrypted, type, seq)) {
                  if (type == protocol::MessageType::MSG) {
-                     /* Convert to legacy Packet for callback compatibility */
-                     /* MessagePayload format: DestID(2) | Len(1) | User | Msg */
+                     /*
+                      * Parse wrapped payload format:
+                      * [type(1) | flags(1) | source_id(2) | payload_len(2) | payload...]
+                      */
+                     if (decrypted.size() < 6) {
+                         gossip::logging::error("Decrypted payload too short for wrapped header");
+                         close();
+                         return false;
+                     }
                      
+                     uint8_t orig_type = decrypted[0];
+                     uint8_t orig_flags = decrypted[1];
+                     uint16_t orig_source_id = (static_cast<uint16_t>(decrypted[2]) << 8) | 
+                                               static_cast<uint16_t>(decrypted[3]);
+                     uint16_t orig_payload_len = (static_cast<uint16_t>(decrypted[4]) << 8) | 
+                                                 static_cast<uint16_t>(decrypted[5]);
+                     
+                     if (decrypted.size() < static_cast<size_t>(6 + orig_payload_len)) {
+                         gossip::logging::error("Decrypted payload shorter than declared length");
+                         close();
+                         return false;
+                     }
+                     
+                     /* Convert to legacy Packet for callback compatibility */
                      Packet packet; 
                      packet.header().magic = MAGIC_BYTE;
                      packet.header().version = PROTOCOL_VERSION;
-                     packet.header().type = static_cast<uint8_t>(PacketType::MSG);
-                     packet.header().source_id = node_id_;
-                     packet.set_payload(decrypted);
+                     packet.header().type = orig_type;
+                     packet.header().flags = orig_flags;  /* Restore flags including FLAG_BROADCAST */
+                     packet.header().source_id = orig_source_id;
+                     packet.set_payload(decrypted.data() + 6, orig_payload_len);
                      
                      if (packet_callback_) packet_callback_(packet);
                  }
@@ -555,12 +606,42 @@ std::shared_ptr<Connection> ConnectionManager::connect_to(const std::string& add
         return nullptr;
     }
     
-    if (connect(sock, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr)) < 0) {
+    /*
+     * Use non-blocking connect to avoid indefinite blocking.
+     * This is important on mobile/unreliable networks.
+     */
+    set_nonblocking(sock);
+    
+    int ret = connect(sock, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
+    if (ret < 0 && errno != EINPROGRESS) {
         ::close(sock);
         return nullptr;
     }
     
-    set_nonblocking(sock);
+    if (ret < 0 && errno == EINPROGRESS) {
+        /* Wait for connection with timeout using poll */
+        struct pollfd pfd;
+        pfd.fd = sock;
+        pfd.events = POLLOUT;
+        pfd.revents = 0;
+        
+        constexpr int CONNECT_TIMEOUT_MS = 5000;  /* 5 second timeout */
+        int poll_ret = ::poll(&pfd, 1, CONNECT_TIMEOUT_MS);
+        
+        if (poll_ret <= 0) {
+            /* Timeout or error */
+            ::close(sock);
+            return nullptr;
+        }
+        
+        /* Check if connection succeeded */
+        int so_error = 0;
+        socklen_t len = sizeof(so_error);
+        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &len) < 0 || so_error != 0) {
+            ::close(sock);
+            return nullptr;
+        }
+    }
     
     int opt = 1;
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));

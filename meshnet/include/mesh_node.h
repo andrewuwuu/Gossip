@@ -147,7 +147,7 @@ private:
     EventCallback event_callback_;
     
     int discovery_socket_;
-    std::unordered_set<uint32_t> seen_sequences_;
+    std::unordered_set<uint64_t> seen_sequences_;
     std::mutex seen_mutex_;
     
     std::mutex pending_mutex_;

@@ -71,6 +71,15 @@ public:
     void set_from_keys(const uint8_t* public_key, const uint8_t* secret_key);
     
     /*
+     * Sets identity from a 32-byte seed (derives Ed25519 keypair deterministically).
+     * This allows external callers to provide a seed and get repeatable key derivation.
+     *
+     * @param seed 32-byte seed value
+     * @return true on success
+     */
+    bool set_from_seed(const uint8_t* seed);
+    
+    /*
      * Checks if this identity has a valid keypair.
      */
     bool valid() const { return valid_; }

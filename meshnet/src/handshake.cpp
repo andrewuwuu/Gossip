@@ -226,22 +226,9 @@ bool Handshake::derive_keys() {
     /* Step 4: HKDF-Expand for K_resp */
     crypto::hkdf_expand_label(prk, "gossip-resp", k_resp_);
     
-    char key_debug[512];
-    std::snprintf(key_debug, sizeof(key_debug), 
-        "Keys derived. Role=%d\n"
-        "  K_init=%02x%02x%02x%02x K_resp=%02x%02x%02x%02x\n"
-        "  TranscriptHash=%02x%02x%02x%02x Shared=%02x%02x%02x%02x\n"
-        "  H_Init: Len=%zu Byte0=%02x\n"
-        "  H_Resp: Len=%zu Byte0=%02x",
-        static_cast<int>(role_),
-        k_init_[0], k_init_[1], k_init_[2], k_init_[3],
-        k_resp_[0], k_resp_[1], k_resp_[2], k_resp_[3],
-        transcript_hash_[0], transcript_hash_[1], transcript_hash_[2], transcript_hash_[3],
-        ikm[0], ikm[1], ikm[2], ikm[3],
-        hello_init_.size(), (hello_init_.empty() ? 0 : hello_init_[0]),
-        hello_resp_.size(), (hello_resp_.empty() ? 0 : hello_resp_[0])
-    );
-    gossip::logging::debug(key_debug);
+    /* SECURITY: Don't log key material - removed sensitive debug output */
+    gossip::logging::debug(std::string("Keys derived successfully. Role=") + 
+        std::to_string(static_cast<int>(role_)));
 
     /* Wipe IKM immediately */
     crypto::secure_zero(ikm, sizeof(ikm));

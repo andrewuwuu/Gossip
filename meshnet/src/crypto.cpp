@@ -173,6 +173,14 @@ void ed25519_generate_keypair(uint8_t* public_key, uint8_t* secret_key) {
     crypto_sign_keypair(public_key, secret_key);
 }
 
+void ed25519_keypair_from_seed(uint8_t* public_key, uint8_t* secret_key, const uint8_t* seed) {
+    /*
+     * crypto_sign_seed_keypair derives an Ed25519 keypair from a 32-byte seed.
+     * This is deterministic - same seed always produces the same keypair.
+     */
+    crypto_sign_seed_keypair(public_key, secret_key, seed);
+}
+
 bool ed25519_sign(
     const uint8_t* secret_key,
     const uint8_t* message,

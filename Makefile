@@ -40,9 +40,14 @@ install: build
 dev: meshnet
 	@CGO_ENABLED=1 LD_LIBRARY_PATH=./meshnet/build go run .
 
-test: meshnet
-	@echo "Running tests..."
-	@CGO_ENABLED=1 LD_LIBRARY_PATH=./meshnet/build go test ./...
+test:
+	@echo "Building C++ tests..."
+	@mkdir -p meshnet/build
+	@cd meshnet/build && cmake .. -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON && make -j$$(nproc)
+	@echo "Running C++ tests..."
+	@cd meshnet/build && ctest --output-on-failure
+	@echo "Running Go tests..."
+	@CGO_ENABLED=1 LD_LIBRARY_PATH=./meshnet/build go test -v ./internal/chat/...
 
 help:
 	@echo "Gossip P2P Mesh Chat - Build System"

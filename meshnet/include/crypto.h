@@ -178,6 +178,15 @@ constexpr size_t ED25519_SIGNATURE_SIZE = 64;    /* Ed25519 signature */
 void ed25519_generate_keypair(uint8_t* public_key, uint8_t* secret_key);
 
 /*
+ * Derives an Ed25519 keypair from a 32-byte seed deterministically.
+ *
+ * @param public_key   Output buffer for 32-byte public key
+ * @param secret_key   Output buffer for 64-byte secret key
+ * @param seed         32-byte seed value
+ */
+void ed25519_keypair_from_seed(uint8_t* public_key, uint8_t* secret_key, const uint8_t* seed);
+
+/*
  * Signs a message using Ed25519.
  *
  * @param secret_key  64-byte Ed25519 secret key

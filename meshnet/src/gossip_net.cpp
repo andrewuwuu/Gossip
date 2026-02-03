@@ -475,9 +475,13 @@ int gossip_set_private_key(const uint8_t* private_key) {
     g_identity = std::make_unique<gossip::Identity>();
     
     /*
-     * Generate a new keypair since Identity::generate() is the clean way.
+     * Use the provided key as seed to derive Ed25519 keypair deterministically.
+     * This ensures the API contract is respected - the provided key determines the identity.
      */
-    g_identity->generate();
+    if (!g_identity->set_from_seed(private_key)) {
+        g_identity.reset();
+        return -1;
+    }
     
     /*
      * Propagate identity to MeshNode if it exists
@@ -492,7 +496,7 @@ int gossip_set_private_key(const uint8_t* private_key) {
         node->set_identity(g_identity->public_key(), g_identity->secret_key());
     }
     
-    gossip::logging::info("Identity generated");
+    gossip::logging::info("Identity set from provided key");
     return 0;
 }
 

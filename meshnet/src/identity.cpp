@@ -151,6 +151,21 @@ void Identity::set_from_keys(const uint8_t* public_key, const uint8_t* secret_ke
     }
 }
 
+bool Identity::set_from_seed(const uint8_t* seed) {
+    if (!seed) {
+        return false;
+    }
+    
+    /*
+     * Derive Ed25519 keypair from 32-byte seed.
+     * Uses crypto_sign_seed_keypair internally via crypto module.
+     * The seed must be kept secret as it can regenerate the full keypair.
+     */
+    crypto::ed25519_keypair_from_seed(public_key_, secret_key_, seed);
+    valid_ = true;
+    return true;
+}
+
 std::string Identity::public_key_hex() const {
     return bytes_to_hex(public_key_, crypto::ED25519_PUBLIC_KEY_SIZE);
 }

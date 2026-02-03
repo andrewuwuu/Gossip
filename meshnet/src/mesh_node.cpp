@@ -23,8 +23,8 @@ int64_t current_time_ms() {
     ).count();
 }
 
-uint32_t make_seq_key(uint16_t source_id, uint32_t sequence) {
-    return (static_cast<uint32_t>(source_id) << 16) | (sequence & 0xFFFF);
+uint64_t make_seq_key(uint16_t source_id, uint32_t sequence) {
+    return (static_cast<uint64_t>(source_id) << 32) | static_cast<uint64_t>(sequence);
 }
 
 }  /* namespace */
@@ -152,6 +152,11 @@ bool MeshNode::start(uint16_t listen_port, uint16_t discovery_port) {
              push_event(std::move(event));
         });
         
+        if (!identity_) {
+            gossip::logging::error("Cannot start responder handshake: no identity set");
+            conn->close();
+            return;
+        }
         conn->start_handshake(*identity_, false);
     });
 
@@ -354,6 +359,9 @@ bool MeshNode::connect_to_peer(const std::string& addr, uint16_t port) {
         });
         
         conn->start_handshake(*identity_, true);
+    } else {
+        gossip::logging::error("Cannot initiate handshake: no identity configured");
+        return false;
     }
     
     return true;
@@ -560,6 +568,7 @@ void MeshNode::handle_discovery() {
         const uint8_t* port_ptr = buffer + 107;     /* 43 + 64 */
         
         /* Prevent reflection (ignore own beacon) */
+        if (!has_identity_) continue;  /* Cannot compare without identity */
         if (std::memcmp(ik_pub, identity_public_key_, 32) == 0) continue;
         
         /* Verify Timestamp (±60s) */
@@ -612,7 +621,7 @@ void MeshNode::push_event(MeshEvent event) {
 }
 
 bool MeshNode::is_duplicate(uint16_t source_id, uint32_t sequence) {
-    uint32_t key = make_seq_key(source_id, sequence);
+    uint64_t key = make_seq_key(source_id, sequence);
     
     std::lock_guard<std::mutex> lock(seen_mutex_);
     if (seen_sequences_.count(key) > 0) {

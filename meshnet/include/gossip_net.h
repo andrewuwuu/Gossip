@@ -198,14 +198,14 @@ int gossip_is_encrypted(void);
  * =============================================================================
  */
 
-#define GOSSIP_PUBLIC_KEY_SIZE  32   /* X25519 public key */
-#define GOSSIP_PRIVATE_KEY_SIZE 32   /* X25519 private key */
+#define GOSSIP_PUBLIC_KEY_SIZE  32   /* Ed25519 public key */
+#define GOSSIP_PRIVATE_KEY_SIZE 32   /* Ed25519 seed (32 bytes for deterministic derivation) */
 
 /*
- * Generates a new X25519 keypair.
+ * Generates a new Ed25519 keypair.
  *
  * @param public_key  Output buffer for 32-byte public key
- * @param private_key Output buffer for 32-byte private key
+ * @param private_key Output buffer for 64-byte secret key (note: full secret key format)
  */
 void gossip_generate_keypair(uint8_t* public_key, uint8_t* private_key);
 
@@ -227,10 +227,10 @@ int gossip_load_identity(const char* path);
 int gossip_save_identity(const char* path);
 
 /*
- * Sets the node's private key directly.
- * The public key is derived automatically.
+ * Sets the node's identity from a 32-byte seed.
+ * Derives Ed25519 keypair deterministically from the seed.
  *
- * @param private_key 32-byte private key
+ * @param private_key 32-byte seed value
  * @return 0 on success, -1 on error
  */
 int gossip_set_private_key(const uint8_t* private_key);
